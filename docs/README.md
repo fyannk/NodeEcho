@@ -9,6 +9,7 @@ NodeEcho is currently a design proposal. These notes capture research checked on
 | [Ecosystem research](ecosystem.md) | Kubernetes, Strimzi, ECK, Prometheus, and related approaches |
 | [Operators survey](operators.md) | What about twenty data and messaging operators read from Nodes, and whether NodeEcho would cover it |
 | [Design notes](design.md) | Proposed scope, data contract, consistency, permissions, and validation |
+| [Contract v1](contract.md) | The keys a consumer sees on its pods, their values, and what it may rely on |
 
 The research uses primary project documentation, source code, and upstream
 issues/PRs. Links to moving documentation are accompanied by source snapshots

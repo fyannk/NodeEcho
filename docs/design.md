@@ -1,6 +1,8 @@
 # Proposed design
 
 Status: **proposal**, 2026-10-16. Examples below are not an implemented API.
+The consumer-facing rules are in the [contract](contract.md); this page keeps
+the reasoning.
 
 ## Goal
 
@@ -186,8 +188,8 @@ structured data. Topology can be copied as labels under its original or a
 configured destination key, subject to collision rules.
 
 There is no schema-version or source-identity key on pods. The values are
-plain echoes in Kubernetes' own formats; the contract is versioned in this
-documentation, and a breaking change uses a new key name.
+plain echoes in Kubernetes' own formats; the [contract](contract.md) is
+versioned, and a breaking change uses a new key name.
 
 ## Reconciliation
 
