@@ -19,13 +19,18 @@ SPDX-License-Identifier: Apache-2.0
 package projection
 
 import (
+	"encoding/json"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/fyannk/nodeecho/internal/config"
 )
@@ -154,4 +159,88 @@ func TestEmptyRuleBlocksWriteNothing(t *testing.T) {
 	if len(res.Labels)+len(res.Annotations)+len(res.Skipped) != 0 {
 		t.Errorf("a rule without blocks wrote %+v", res)
 	}
+}
+
+func TestTopologyWithAPrefixOrAsAnnotationIsCopied(t *testing.T) {
+	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{zone: "a"}}}
+	opts := Options{KubernetesCopiesTopology: true}
+
+	r := rule()
+	r.Labels.Target = config.TargetAnnotations
+	if res := desired(t, r, n, opts); res.Annotations[zone] != "a" {
+		t.Errorf("Kubernetes writes no zone annotation: annotations = %v", res.Annotations)
+	}
+
+	r = rule()
+	r.Labels.Prefix = "node."
+	if res := desired(t, r, n, opts); res.Labels["node."+zone] != "a" {
+		t.Errorf("Kubernetes writes no prefixed label: labels = %v", res.Labels)
+	}
+}
+
+// FuzzDesired checks the invariants of a projection for arbitrary Node
+// metadata: label values are valid, unschedulable is "true" or absent, the
+// taints annotation is absent or a non-empty JSON list of listed taints in
+// Node order, and copies keep their values.
+func FuzzDesired(f *testing.F) {
+	f.Add("a", "row 3, slot 12", "karpenter.sh/disrupted", "v", true, false)
+	f.Add("", "", "dedicated", "", false, true)
+	f.Add(strings.Repeat("x", 64), "-bad-", "ToBeDeletedByClusterAutoscaler", "1760605920", true, true)
+	f.Fuzz(func(t *testing.T, labelValue, annotationValue, taintKey, taintValue string, unschedulable, asLabels bool) {
+		for _, s := range []string{labelValue, annotationValue, taintKey, taintValue} {
+			if !utf8.ValidString(s) {
+				t.Skip("API objects only hold UTF-8")
+			}
+		}
+		r := rule()
+		if asLabels {
+			r.Annotations.Target = config.TargetLabels
+		}
+		n := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels:      map[string]string{"rack.example.org/id": labelValue},
+				Annotations: map[string]string{"rack.example.org/position": annotationValue},
+			},
+			Spec: corev1.NodeSpec{
+				Unschedulable: unschedulable,
+				Taints: []corev1.Taint{
+					{Key: taintKey, Value: taintValue, Effect: corev1.TaintEffectNoSchedule},
+					{Key: "karpenter.sh/disrupted", Effect: corev1.TaintEffectNoExecute},
+				},
+			},
+		}
+		res := desired(t, r, n, Options{KubernetesCopiesTopology: true})
+
+		for k, v := range res.Labels {
+			if msgs := validation.IsValidLabelValue(v); len(msgs) > 0 {
+				t.Fatalf("invalid label value %s=%q written", k, v)
+			}
+		}
+		if v, ok := res.Labels[uKey]; ok != unschedulable || (ok && v != "true") {
+			t.Fatalf("unschedulable label = %q (present %v), node unschedulable %v", v, ok, unschedulable)
+		}
+		var taints []corev1.Taint
+		if err := json.Unmarshal([]byte(res.Annotations[tKey]), &taints); err != nil {
+			t.Fatalf("taints annotation %q: %v", res.Annotations[tKey], err)
+		}
+		var want []corev1.Taint
+		for _, tt := range n.Spec.Taints {
+			if slices.Contains(r.Taints.Copy, tt.Key) {
+				want = append(want, tt)
+			}
+		}
+		if !equality.Semantic.DeepEqual(taints, want) {
+			t.Fatalf("taints = %+v, want %+v", taints, want)
+		}
+		if v, ok := res.Labels["rack.example.org/id"]; ok && v != labelValue {
+			t.Fatalf("label copy changed the value: %q", v)
+		}
+		pos := res.Annotations["rack.example.org/position"]
+		if asLabels {
+			pos = res.Labels["rack.example.org/position"]
+		}
+		if len(res.Skipped) == 0 && pos != annotationValue {
+			t.Fatalf("annotation copy = %q, want %q", pos, annotationValue)
+		}
+	})
 }

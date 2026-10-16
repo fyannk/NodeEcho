@@ -82,21 +82,25 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	if pod.Spec.NodeName != "" {
 		node = &corev1.Node{}
 		if err := r.Get(ctx, types.NamespacedName{Name: pod.Spec.NodeName}, node); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return ctrl.Result{}, err
+			if apierrors.IsNotFound(err) {
+				// Left as is: the pod garbage collector deletes the pods of a
+				// deleted Node, and a Node created later enqueues its pods.
+				return ctrl.Result{}, nil
 			}
-			node = nil // the pod garbage collector removes pods of deleted Nodes
+			return ctrl.Result{}, err
 		}
 	}
 	ns := &corev1.Namespace{}
-	if err := r.Get(ctx, types.NamespacedName{Name: pod.Namespace}, ns); client.IgnoreNotFound(err) != nil {
-		return ctrl.Result{}, err
+	if err := r.Get(ctx, types.NamespacedName{Name: pod.Namespace}, ns); err != nil {
+		// A namespace missing from the cache would read as having no labels.
+		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	var errs []error
 	active := map[string]bool{}
-	for i := range r.Store.Rules() {
-		rule := &r.Store.Rules()[i]
+	rules := r.Store.Rules() // one snapshot: Set may swap the rules meanwhile
+	for i := range rules {
+		rule := &rules[i]
 		active[rule.FieldManager()] = true
 		desired := projection.Result{}
 		if node != nil && inScope(rule, ns, pod, node) {
@@ -114,8 +118,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	for _, m := range pod.ManagedFields {
 		if strings.HasPrefix(m.Manager, fieldManagerPrefix) && m.Operation == "Apply" && !active[m.Manager] {
 			active[m.Manager] = true
-			name := strings.TrimPrefix(m.Manager, fieldManagerPrefix)
-			errs = append(errs, r.sync(ctx, pod, name, m.Manager, projection.Result{}))
+			errs = append(errs, r.sync(ctx, pod, removedRule, m.Manager, projection.Result{}))
 		}
 	}
 	return ctrl.Result{}, errors.Join(errs...)
@@ -131,11 +134,11 @@ func inScope(rule *Rule, ns *corev1.Namespace, pod *corev1.Pod, node *corev1.Nod
 // Kubernetes should have copied, see docs/contract.md.
 func (r *PodReconciler) warnMissingTopology(pod *corev1.Pod, node *corev1.Node, rule *Rule) {
 	l := rule.Labels
-	if l == nil || l.ForceKubernetesManaged || !r.Options.KubernetesCopiesTopology {
+	if l == nil {
 		return
 	}
 	for _, k := range l.Copy {
-		if !projection.KubernetesManagedLabels[k] {
+		if !projection.LeftToKubernetes(l, k, r.Options) {
 			continue
 		}
 		if _, onNode := node.Labels[k]; !onNode {
@@ -149,6 +152,11 @@ func (r *PodReconciler) warnMissingTopology(pod *corev1.Pod, node *corev1.Node, 
 	}
 }
 
+// removedRule names a rule that no longer exists in metrics and Events:
+// anyone able to patch a pod can apply under a nodeecho/ manager name, so
+// that name is not used as a metric label.
+const removedRule = "(removed)"
+
 // sync applies the desired keys of one field manager, skipping the keys
 // another writer owns, and writes nothing when the pod already matches.
 func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager string, desired projection.Result) error {
@@ -159,8 +167,10 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 	wantLabels := r.withoutForeign(pod, rule, desired.Labels, pod.Labels, ownedLabels)
 	wantAnnotations := r.withoutForeign(pod, rule, desired.Annotations, pod.Annotations, ownedAnnotations)
 
+	retry := false
 	for attempt := 0; ; attempt++ {
-		if upToDate(wantLabels, pod.Labels, ownedLabels) && upToDate(wantAnnotations, pod.Annotations, ownedAnnotations) {
+		// After a conflict the pod object is stale, so apply anyway.
+		if !retry && upToDate(wantLabels, pod.Labels, ownedLabels) && upToDate(wantAnnotations, pod.Annotations, ownedAnnotations) {
 			return nil
 		}
 		ac := corev1ac.Pod(pod.Name, pod.Namespace).WithUID(pod.UID)
@@ -179,6 +189,14 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 		case apierrors.IsNotFound(err), apierrors.IsInvalid(err) && strings.Contains(err.Error(), "metadata.uid"):
 			podWrites.WithLabelValues(rule, "gone").Inc()
 			return nil // the pod was deleted or replaced; the new one has its own event
+		case apierrors.IsInvalid(err), apierrors.IsForbidden(err):
+			// The pod refuses the write, for instance annotations over the
+			// size limit or no patch right in its namespace: retrying cannot
+			// help until something changes, which brings a new event.
+			podWrites.WithLabelValues(rule, "rejected").Inc()
+			keysSkipped.WithLabelValues(rule, "rejected").Inc()
+			r.Recorder.Eventf(pod, nil, corev1.EventTypeWarning, ReasonKeySkipped, "Echo", "rule %s: write rejected: %v", rule, err)
+			return nil
 		case apierrors.IsConflict(err) && attempt < 3:
 			podWrites.WithLabelValues(rule, "conflict").Inc()
 			keys := conflictingKeys(err)
@@ -195,8 +213,7 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 					r.skip(pod, rule, k.key, "owned-by-other", "annotation owned by another writer")
 				}
 			}
-			// Force the next attempt, even if what is left looks current.
-			ownedLabels, ownedAnnotations = nil, nil
+			retry = true
 		default:
 			podWrites.WithLabelValues(rule, "error").Inc()
 			return fmt.Errorf("applying rule %s to pod %s/%s: %w", rule, pod.Namespace, pod.Name, err)
@@ -316,7 +333,7 @@ func (r *PodReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("pods").
 		For(&corev1.Pod{}, builder.WithPredicates(podMetadataChanged)).
-		Watches(&corev1.Node{}, podsOnNode, builder.WithPredicates(nodeEchoedFieldsChanged)).
+		Watches(&corev1.Node{}, podsOnNode, builder.WithPredicates(nodeEchoedFieldsChanged(r.Store.CopiesAnnotations))).
 		Watches(&corev1.Namespace{}, podsInNamespace, builder.WithPredicates(predicate.LabelChangedPredicate{})).
 		WatchesRawSource(source.Channel(r.Resync, &handler.EnqueueRequestForObject{})).
 		Complete(r)
@@ -348,14 +365,19 @@ var podMetadataChanged = predicate.Funcs{
 	DeleteFunc: func(event.DeleteEvent) bool { return false },
 }
 
-// nodeEchoedFieldsChanged ignores Node status updates such as heartbeats.
-var nodeEchoedFieldsChanged = predicate.Funcs{
-	UpdateFunc: func(e event.UpdateEvent) bool {
-		o, n := e.ObjectOld.(*corev1.Node), e.ObjectNew.(*corev1.Node)
-		return o.Spec.Unschedulable != n.Spec.Unschedulable ||
-			!equality.Semantic.DeepEqual(o.Spec.Taints, n.Spec.Taints) ||
-			!maps.Equal(o.Labels, n.Labels) ||
-			!maps.Equal(o.Annotations, n.Annotations)
-	},
-	DeleteFunc: func(event.DeleteEvent) bool { return false },
+// nodeEchoedFieldsChanged ignores Node status updates such as heartbeats,
+// and annotation changes while no rule copies annotations: CNI, CSI and
+// cloud controllers update Node annotations often. A rule change resyncs
+// every pod anyway.
+func nodeEchoedFieldsChanged(copiesAnnotations func() bool) predicate.Funcs {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			o, n := e.ObjectOld.(*corev1.Node), e.ObjectNew.(*corev1.Node)
+			return o.Spec.Unschedulable != n.Spec.Unschedulable ||
+				!equality.Semantic.DeepEqual(o.Spec.Taints, n.Spec.Taints) ||
+				!maps.Equal(o.Labels, n.Labels) ||
+				(!maps.Equal(o.Annotations, n.Annotations) && copiesAnnotations())
+		},
+		DeleteFunc: func(event.DeleteEvent) bool { return false },
+	}
 }

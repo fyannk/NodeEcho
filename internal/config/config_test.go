@@ -124,3 +124,158 @@ func TestParseSameCopyInTwoRulesIsAllowed(t *testing.T) {
 		t.Fatalf("rules=%d refused=%v err=%v", len(rules), refused, err)
 	}
 }
+
+func TestParseYAMLCornerCases(t *testing.T) {
+	for name, tc := range map[string]struct {
+		doc   string
+		rules int
+		fails bool
+	}{
+		"empty document":     {"", 0, true},
+		"version as string":  {"version: \"1\"\nrules: []\n", 0, true},
+		"version as float":   {"version: 1.5\nrules: []\n", 0, true},
+		"null rules":         {"version: 1\nrules:\n", 0, true},
+		"no rules field":     {"version: 1\n", 0, true},
+		"empty rules":        {"version: 1\nrules: []\n", 0, false},
+		"duplicate key":      {"version: 1\nversion: 1\nrules: []\n", 0, true},
+		"duplicate rule key": {header + "- name: a\n  name: b\n  podSelector: {matchLabels: {a: b}}\n  unschedulable: {}\n", 0, true},
+		"rules not a list":   {"version: 1\nrules: {}\n", 0, true},
+		"null rule":          {header + "- null\n", 0, false},
+		"json document":      {`{"version":1,"rules":[{"name":"a","podSelector":{"matchLabels":{"a":"b"}},"unschedulable":{}}]}`, 1, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rules, _, err := Parse([]byte(tc.doc))
+			if (err != nil) != tc.fails {
+				t.Fatalf("err = %v, want failure %v", err, tc.fails)
+			}
+			if len(rules) != tc.rules {
+				t.Fatalf("rules = %d, want %d", len(rules), tc.rules)
+			}
+		})
+	}
+}
+
+func TestParseKeyLengths(t *testing.T) {
+	const sel = "  podSelector: {matchLabels: {app: db}}\n"
+	long := strings.Repeat("a", 63)
+	for name, tc := range map[string]struct {
+		rule string
+		ok   bool
+	}{
+		"63-char name part":          {"  labels: {copy: [x.io/" + long + "]}\n", true},
+		"64-char name part":          {"  labels: {copy: [x.io/" + long + "a]}\n", false},
+		"prefix pushes it over":      {"  labels: {copy: [" + long + "], prefix: n.}\n", false},
+		"prefix adds a domain":       {"  labels: {copy: [zone], prefix: node.example.org/}\n", true},
+		"prefix after a domain":      {"  labels: {copy: [x.io/zone], prefix: node.}\n", true},
+		"prefix yields two slashes":  {"  labels: {copy: [x.io/zone], prefix: node.io/}\n", false},
+		"63-char rule name":          {"", true},
+		"uppercase unschedulable":    {"  unschedulable: {key: X.io/Cordon}\n", false},
+		"annotation name part valid": {"  annotations: {copy: [x.io/" + long + "]}\n", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ruleName := "a"
+			body := tc.rule
+			if body == "" {
+				ruleName = long
+				body = "  unschedulable: {}\n"
+			}
+			rules, refused, err := Parse([]byte(header + "- name: " + ruleName + "\n" + sel + body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(rules) == 1; got != tc.ok {
+				t.Fatalf("accepted = %v, want %v (refused %v)", got, tc.ok, refused)
+			}
+		})
+	}
+}
+
+// FuzzParse checks that Parse never panics, that every accepted rule passes
+// validation again, and that refused rules point at real indexes.
+func FuzzParse(f *testing.F) {
+	f.Add([]byte(header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  unschedulable: {}\n  taints: {copy: [t]}\n"))
+	f.Add([]byte(header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [zone], prefix: p.io/}\n  annotations: {copy: [x], target: labels}\n"))
+	f.Add([]byte(header + "- name: a\n  podSelector: {matchExpressions: [{key: a, operator: Exists}]}\n  unschedulable: {target: annotations}\n- name: a\n"))
+	f.Add([]byte("version: 1\nrules: []\n"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		rules, refused, err := Parse(data)
+		if err != nil {
+			if len(rules) != 0 || len(refused) != 0 {
+				t.Fatal("an error must come without rules")
+			}
+			return
+		}
+		names := map[string]bool{}
+		for i := range rules {
+			r := rules[i]
+			if err := r.validate(); err != nil {
+				t.Fatalf("accepted rule fails validation: %v", err)
+			}
+			if names[r.Name] {
+				t.Fatalf("duplicate name %q accepted", r.Name)
+			}
+			names[r.Name] = true
+		}
+		for _, e := range refused {
+			if e.Index < 0 || e.Err == nil {
+				t.Fatalf("bad refusal %+v", e)
+			}
+		}
+	})
+}
+
+func TestParseEchoKeyAsAnotherRulesCopyRefusesBoth(t *testing.T) {
+	const sel = "  podSelector: {matchLabels: {app: db}}\n"
+	for name, tc := range map[string]struct {
+		doc     string
+		refused int
+	}{
+		"echo label vs copied label": {"- name: a\n" + sel + "  unschedulable: {key: x.io/k}\n" +
+			"- name: b\n" + sel + "  labels: {copy: [x.io/k]}\n", 2},
+		"taints vs copied annotation with a prefix": {"- name: a\n" + sel + "  taints: {copy: [t], key: n.x.io/k}\n" +
+			"- name: b\n" + sel + "  annotations: {copy: [x.io/k], prefix: n.}\n", 2},
+		"different maps do not collide": {"- name: a\n" + sel + "  unschedulable: {key: x.io/k}\n" +
+			"- name: b\n" + sel + "  labels: {copy: [x.io/k], target: annotations}\n", 0},
+		"one rule, same name as label and annotation": {"- name: a\n" + sel +
+			"  unschedulable: {key: x.io/k}\n  taints: {copy: [t], key: x.io/k}\n", 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, refused, err := Parse([]byte(header + tc.doc))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(refused) != tc.refused {
+				t.Fatalf("refused = %v, want %d", refused, tc.refused)
+			}
+		})
+	}
+}
+
+func TestParseWholeDocumentTypeErrors(t *testing.T) {
+	// Unknown fields and wrong types refuse the whole document, not one rule.
+	for name, doc := range map[string]string{
+		"misspelt field":       header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], prefx: p.}\n",
+		"copy is not a list":   header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: zone}\n",
+		"force is not boolean": header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], forceKubernetesManaged: yes please}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := Parse([]byte(doc)); err == nil {
+				t.Fatal("expected a whole-document error")
+			}
+		})
+	}
+	// A number in a selector reads as its string.
+	rules, refused, err := Parse([]byte(header + "- name: a\n  podSelector: {matchLabels: {tier: 1}}\n  unschedulable: {}\n"))
+	if err != nil || len(refused) != 0 || rules[0].PodSelector.MatchLabels["tier"] != "1" {
+		t.Fatalf("numeric selector value: rules=%+v err=%v", rules, err)
+	}
+	// An empty expression list is an empty selector.
+	_, refused, err = Parse([]byte(header + "- name: a\n  podSelector: {matchExpressions: []}\n  unschedulable: {}\n"))
+	if err != nil || len(refused) != 1 {
+		t.Fatalf("empty matchExpressions: refused=%v err=%v", refused, err)
+	}
+	_, refused, err = Parse([]byte(header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [\"\"]}\n"))
+	if err != nil || len(refused) != 1 {
+		t.Fatalf("empty copy key: refused=%v err=%v", refused, err)
+	}
+}

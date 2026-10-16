@@ -44,7 +44,8 @@ import (
 )
 
 // The tests run NodeEcho against a real API server (envtest). Without
-// KUBEBUILDER_ASSETS they are skipped; `make test` sets it.
+// KUBEBUILDER_ASSETS they are skipped and only the unit tests run; `make
+// test` sets it.
 
 const (
 	configNS   = "nodeecho-system"
@@ -64,7 +65,7 @@ var (
 func TestMain(m *testing.M) {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		fmt.Println("KUBEBUILDER_ASSETS unset, skipping the envtest suite")
-		os.Exit(0)
+		os.Exit(m.Run())
 	}
 	logs := io.Discard
 	if os.Getenv("NODEECHO_TEST_LOGS") != "" {
@@ -126,6 +127,9 @@ func must(err error) {
 // setRules writes the rules ConfigMap and waits until the Store holds them.
 func setRules(t *testing.T, rules string) {
 	t.Helper()
+	if k8s == nil {
+		t.Skip("needs envtest")
+	}
 	ctx := context.Background()
 	data := "version: 1\nrules:\n" + rules
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: configNS, Name: configName}}

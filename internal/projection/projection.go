@@ -39,6 +39,14 @@ var KubernetesManagedLabels = map[string]bool{
 	"topology.kubernetes.io/region": true,
 }
 
+// LeftToKubernetes reports whether the rule leaves Node label key to
+// Kubernetes: only a copy to the very same pod label, which is the one
+// Kubernetes writes.
+func LeftToKubernetes(l *config.LabelCopy, key string, opts Options) bool {
+	return opts.KubernetesCopiesTopology && !l.ForceKubernetesManaged &&
+		KubernetesManagedLabels[key] && l.Target == config.TargetLabels && l.Prefix == ""
+}
+
 // Options carries the cluster facts a projection depends on.
 type Options struct {
 	// KubernetesCopiesTopology is true on Kubernetes 1.35 and later.
@@ -107,7 +115,7 @@ func Desired(rule config.Rule, node *corev1.Node, opts Options) (Result, error) 
 			if !ok {
 				continue
 			}
-			if KubernetesManagedLabels[k] && opts.KubernetesCopiesTopology && !l.ForceKubernetesManaged {
+			if LeftToKubernetes(l, k, opts) {
 				continue
 			}
 			set(l.Target, l.Prefix+k, v)

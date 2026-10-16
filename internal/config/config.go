@@ -23,6 +23,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,8 +51,10 @@ const (
 
 // Config is the content of the rules ConfigMap key.
 type Config struct {
-	Version int    `json:"version"`
-	Rules   []Rule `json:"rules"`
+	Version int `json:"version"`
+	// Rules is required, so that a forgotten or emptied field does not
+	// remove every key: `rules: []` stops writing.
+	Rules *[]Rule `json:"rules"`
 }
 
 // Rule selects pods and says what to echo onto them.
@@ -116,11 +119,15 @@ func Parse(data []byte) ([]Rule, []RuleError, error) {
 	if cfg.Version != Version {
 		return nil, nil, fmt.Errorf("unsupported configuration version %d, want %d", cfg.Version, Version)
 	}
+	if cfg.Rules == nil {
+		return nil, nil, errors.New("rules is required; set rules: [] to stop writing")
+	}
+	all := *cfg.Rules
 
 	var refused []RuleError
-	ok := make([]bool, len(cfg.Rules))
-	for i := range cfg.Rules {
-		r := &cfg.Rules[i]
+	ok := make([]bool, len(all))
+	for i := range all {
+		r := &all[i]
 		r.applyDefaults()
 		if err := r.validate(); err != nil {
 			refused = append(refused, RuleError{Index: i, Name: r.Name, Err: err})
@@ -133,13 +140,36 @@ func Parse(data []byte) ([]Rule, []RuleError, error) {
 	// so the outcome does not depend on rule order.
 	byName := map[string][]int{}
 	byEchoKey := map[string][]int{}
-	for i, r := range cfg.Rules {
+	// An echo key is also refused as another rule's copy destination in the
+	// same metadata map: the two would write different values.
+	copiedTo := map[destination][]int{}
+	for i, r := range all {
 		if !ok[i] {
 			continue
 		}
 		byName[r.Name] = append(byName[r.Name], i)
-		for _, k := range r.echoKeys() {
+		for _, k := range r.EchoKeys() {
 			byEchoKey[k] = append(byEchoKey[k], i)
+		}
+		for _, d := range r.destinations() {
+			if !d.echo {
+				copiedTo[d.key()] = append(copiedTo[d.key()], i)
+			}
+		}
+	}
+	for i, r := range all {
+		if !ok[i] {
+			continue
+		}
+		for _, d := range r.destinations() {
+			if !d.echo {
+				continue
+			}
+			for _, j := range copiedTo[d.key()] {
+				if j != i {
+					byEchoKey[d.Key] = append(byEchoKey[d.Key], j)
+				}
+			}
 		}
 	}
 	shared := map[int]error{}
@@ -151,6 +181,9 @@ func Parse(data []byte) ([]Rule, []RuleError, error) {
 		}
 	}
 	for key, idx := range byEchoKey {
+		// A rule may use one key name both as a label and as an annotation.
+		slices.Sort(idx)
+		idx = slices.Compact(idx)
 		if len(idx) > 1 {
 			for _, i := range idx {
 				if _, done := shared[i]; !done {
@@ -161,12 +194,12 @@ func Parse(data []byte) ([]Rule, []RuleError, error) {
 	}
 	for i, err := range shared {
 		ok[i] = false
-		refused = append(refused, RuleError{Index: i, Name: cfg.Rules[i].Name, Err: err})
+		refused = append(refused, RuleError{Index: i, Name: all[i].Name, Err: err})
 	}
 	sort.Slice(refused, func(a, b int) bool { return refused[a].Index < refused[b].Index })
 
 	var rules []Rule
-	for i, r := range cfg.Rules {
+	for i, r := range all {
 		if ok[i] {
 			rules = append(rules, r)
 		}
@@ -194,9 +227,41 @@ func (r *Rule) applyDefaults() {
 	}
 }
 
-// echoKeys returns the keys of the echoed Node spec fields, which must be
+// destination is a pod key a rule writes.
+type destination struct {
+	Target Target
+	Key    string
+	echo   bool // an echoed Node spec field, not a copy
+}
+
+func (d destination) key() destination { return destination{Target: d.Target, Key: d.Key} }
+
+// destinations returns the pod keys the rule writes. Only meaningful after
+// applyDefaults.
+func (r *Rule) destinations() []destination {
+	var out []destination
+	if u := r.Unschedulable; u != nil {
+		out = append(out, destination{u.Target, u.Key, true})
+	}
+	if t := r.Taints; t != nil {
+		out = append(out, destination{TargetAnnotations, t.Key, true})
+	}
+	if l := r.Labels; l != nil {
+		for _, k := range l.Copy {
+			out = append(out, destination{l.Target, l.Prefix + k, false})
+		}
+	}
+	if a := r.Annotations; a != nil {
+		for _, k := range a.Copy {
+			out = append(out, destination{a.Target, a.Prefix + k, false})
+		}
+	}
+	return out
+}
+
+// EchoKeys returns the keys of the echoed Node spec fields, which must be
 // unique across rules.
-func (r *Rule) echoKeys() []string {
+func (r *Rule) EchoKeys() []string {
 	var keys []string
 	if r.Unschedulable != nil {
 		keys = append(keys, r.Unschedulable.Key)

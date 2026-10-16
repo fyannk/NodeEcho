@@ -92,6 +92,9 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "nodeecho.fyannk.dev",
+		// main exits as soon as the manager stops, so the lease can be
+		// released at once and the next instance takes over quickly.
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to create the manager")
@@ -125,9 +128,16 @@ func main() {
 		setupLog.Error(err, "unable to set up the health check")
 		os.Exit(1)
 	}
-	// Ready once a valid configuration is loaded: before that, NodeEcho
-	// writes nothing.
+	// The elected instance is ready once a valid configuration is loaded:
+	// before that, it writes nothing. A standby instance runs no controller
+	// and is ready, so that a rolling update can start the next instance
+	// while the current one holds the lease.
 	if err := mgr.AddReadyzCheck("readyz", func(*http.Request) error {
+		select {
+		case <-mgr.Elected():
+		default:
+			return nil
+		}
 		if !store.Loaded() {
 			return errors.New("no valid configuration loaded")
 		}

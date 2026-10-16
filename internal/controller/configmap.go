@@ -24,13 +24,16 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/fyannk/nodeecho/internal/config"
 )
@@ -113,8 +116,14 @@ func (r *ConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	isRulesConfigMap := predicate.NewPredicateFuncs(func(o client.Object) bool {
 		return o.GetNamespace() == r.ConfigMap.Namespace && o.GetName() == r.ConfigMap.Name
 	})
+	// One reconcile at start, so that a missing ConfigMap is logged.
+	start := make(chan event.GenericEvent, 1)
+	start <- event.GenericEvent{Object: &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Namespace: r.ConfigMap.Namespace, Name: r.ConfigMap.Name,
+	}}}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("rules").
 		For(&corev1.ConfigMap{}, builder.WithPredicates(isRulesConfigMap)).
+		WatchesRawSource(source.Channel(start, &handler.EnqueueRequestForObject{})).
 		Complete(r)
 }

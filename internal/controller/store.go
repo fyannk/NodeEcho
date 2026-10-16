@@ -22,6 +22,7 @@ package controller
 
 import (
 	"reflect"
+	"slices"
 	"sync"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -86,14 +87,24 @@ func (s *Store) Rules() []Rule {
 	return s.rules
 }
 
+// CopiesAnnotations reports whether an active rule copies Node annotations.
+func (s *Store) CopiesAnnotations() bool {
+	return slices.ContainsFunc(s.Rules(), func(r Rule) bool { return r.Annotations != nil })
+}
+
 // Set replaces the active rules with valid. A refused rule whose name was
 // active keeps its last valid version, so that a typo in a running rule does
-// not remove its keys from every pod; it returns the names kept that way.
-// It reports whether the active rules changed.
+// not remove its keys from every pod, unless a valid rule now uses one of its
+// echo keys; it returns the names kept that way. It reports whether the
+// active rules changed.
 func (s *Store) Set(valid []config.Rule, refused []config.RuleError) (changed bool, kept []string, err error) {
 	next := make([]Rule, 0, len(valid))
 	names := map[string]bool{}
+	echoKeys := map[string]bool{}
 	for _, r := range valid {
+		for _, k := range r.EchoKeys() {
+			echoKeys[k] = true
+		}
 		c, err := compile(r)
 		if err != nil {
 			return false, nil, err
@@ -109,7 +120,7 @@ func (s *Store) Set(valid []config.Rule, refused []config.RuleError) (changed bo
 		refusedNames[e.Name] = true
 	}
 	for _, prev := range s.rules {
-		if refusedNames[prev.Name] && !names[prev.Name] {
+		if refusedNames[prev.Name] && !names[prev.Name] && !slices.ContainsFunc(prev.EchoKeys(), func(k string) bool { return echoKeys[k] }) {
 			next = append(next, prev)
 			names[prev.Name] = true
 			kept = append(kept, prev.Name)
@@ -122,12 +133,19 @@ func (s *Store) Set(valid []config.Rule, refused []config.RuleError) (changed bo
 	return changed, kept, nil
 }
 
+// sameRules compares two rule sets by name, ignoring order: the order of
+// the rules does not change what they write.
 func sameRules(a, b []Rule) bool {
 	if len(a) != len(b) {
 		return false
 	}
+	byName := make(map[string]*config.Rule, len(a))
 	for i := range a {
-		if !reflect.DeepEqual(a[i].Rule, b[i].Rule) {
+		byName[a[i].Name] = &a[i].Rule
+	}
+	for i := range b {
+		prev, ok := byName[b[i].Name]
+		if !ok || !reflect.DeepEqual(*prev, b[i].Rule) {
 			return false
 		}
 	}

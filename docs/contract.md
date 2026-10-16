@@ -20,7 +20,9 @@ A pod is in scope for a rule when all of these hold:
 - it matches `podSelector` (required, never empty);
 - `spec.nodeName` is set, and that Node matches `nodeSelector` (empty = all).
 
-Pods remain in scope until they are deleted, whatever their phase. When a pod
+Pods remain in scope until they are deleted, whatever their phase. A pod
+whose Node no longer exists is left as it is: the pod garbage collector
+deletes it. When a pod
 leaves a rule's scope (its labels, its namespace's labels, the Node's labels
 or the rule change), NodeEcho deletes the keys that rule wrote on it.
 
@@ -67,10 +69,12 @@ key on pods.
   An invalid value is not written, a previously written value is removed, and
   NodeEcho emits a Warning Event on the pod and increments a metric.
 - On Kubernetes 1.35 and later, `topology.kubernetes.io/zone` and
-  `topology.kubernetes.io/region` are left to Kubernetes unless the rule sets
-  `labels.forceKubernetesManaged: true`. A selected pod missing such a key
-  while its Node has it gets a Warning Event. `kubernetes.io/hostname` and
-  every other key are copied whenever configured.
+  `topology.kubernetes.io/region` copied as labels without a prefix are left
+  to Kubernetes unless the rule sets `labels.forceKubernetesManaged: true`.
+  A selected pod missing such a key while its Node has it gets a Warning
+  Event. Copied with a prefix or as annotations, they are pod keys Kubernetes
+  does not write, so NodeEcho copies them. `kubernetes.io/hostname` and every
+  other key are copied whenever configured.
 
 ## Ownership
 
@@ -78,7 +82,11 @@ key on pods.
   It owns only the keys it wrote.
 - It never overwrites a key owned by another writer, including a value set in
   the pod's template: the key is skipped, with a Warning Event on the pod and
-  a metric.
+  a metric. A key another writer removes is written again while the Node
+  still has the value.
+- A write the API server rejects, for instance annotations over the size
+  limit, is skipped with a Warning Event and a metric, and retried on the next
+  change to the pod, its Node or the rules.
 - Patches carry the pod UID as a precondition, so a pod recreated under the
   same name is never patched with its predecessor's values.
 - A pod never changes node (`spec.nodeName` is immutable). A rescheduled pod is
@@ -140,15 +148,24 @@ running, when:
   block's `copy` list is empty or repeats a key;
 - a selector or a destination key is invalid;
 - two of its keys resolve to the same pod key;
-- its `unschedulable.key` or `taints.key` is also used by another rule.
+- its `unschedulable.key` or `taints.key` is also used by another rule, as
+  an echo key or as a copy destination in the same metadata map (both rules
+  are refused).
 
 A refused rule whose name was running keeps its last valid version, so that a
-typo does not remove its keys from every pod.
+typo does not remove its keys from every pod, unless a valid rule now uses its
+`unschedulable.key` or `taints.key`.
 
-An unknown `version`, a document that does not parse, or a missing ConfigMap
-or key refuses the whole configuration, and NodeEcho keeps the last valid one.
-To stop writing, set `rules: []`. Until a first valid configuration is
-loaded, NodeEcho writes and removes nothing and reports not ready.
+An unknown `version`, a missing `rules` field, a document that does not
+parse (including an unknown field or a value of the wrong type in any rule),
+or a missing ConfigMap or key refuses the whole configuration, and NodeEcho
+keeps the last valid one. To stop writing, set `rules: []`. Until a first
+valid configuration is loaded, NodeEcho writes and removes nothing, and the
+elected instance reports not ready; standby instances report ready.
+
+The Kubernetes version, which decides whether zone and region are left to
+Kubernetes, is read at start: restart NodeEcho after upgrading the cluster
+past 1.35.
 
 ## Protection
 
