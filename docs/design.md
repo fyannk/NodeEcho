@@ -43,7 +43,7 @@ rules:
   nodeSelector: {}              # optional: only pods on matching nodes
   drain:
     enabled: true
-    domain: drain.example.org   # prefix of this rule's drain mark
+    domain: nodeecho.fyannk.dev # prefix of this rule's drain mark (default)
     taints: []                  # empty = default list, see "Drain mark"
   labels:
     copy: [topology.kubernetes.io/zone, rack.example.org/id]
@@ -70,9 +70,12 @@ rules:
   the same name, or a `prefix` making them collide) are an invalid rule.
 - Two rules on the same pod: copies of the same source agree (same node
   value); drain marks under different domains are both written; the same
-  domain in two rules is an invalid configuration.
+  domain in two rules is an invalid configuration, so at most one rule can
+  keep the default domain.
 
-`example.org` keys are placeholders, as below.
+NodeEcho's own keys use the project domain `nodeecho.fyannk.dev`.
+`example.org` keys stand for other parties' keys (a consumer's or an
+administrator's).
 
 ## Facts and policies
 
@@ -148,17 +151,18 @@ the published facts can ignore the mark.
 
 ## Illustrative pod metadata
 
-`nodeinfo.example.org` is a placeholder, not a chosen or registered project
-domain. The final contract must use an administrator-controlled prefix.
+Keys use the project domain `nodeecho.fyannk.dev`. A rule's `drain.domain`
+lets an administrator publish the drain mark under another prefix, for a
+consumer that already reads its own key.
 
 ```yaml
 metadata:
   labels:
-    nodeinfo.example.org/unschedulable: "true"
+    nodeecho.fyannk.dev/unschedulable: "true"
   annotations:
-    nodeinfo.example.org/taints: '[{"key":"karpenter.sh/disrupted","effect":"NoSchedule"}]'
-    nodeinfo.example.org/source-node-uid: "<node-uid>"
-    nodeinfo.example.org/schema-version: "v1"
+    nodeecho.fyannk.dev/taints: '[{"key":"karpenter.sh/disrupted","effect":"NoSchedule"}]'
+    nodeecho.fyannk.dev/source-node-uid: "<node-uid>"
+    nodeecho.fyannk.dev/schema-version: "v1"
 ```
 
 The taint selection must include every key that the configured consumer needs.
@@ -298,7 +302,6 @@ projector failure should be reported separately.
 
 ## Open decisions
 
-- Project name domain for the metadata keys (placeholder `example.org`).
 - Drain output: the per-rule mark of the 2026-10-12 proposal, the raw facts of
   this document, or both.
 
