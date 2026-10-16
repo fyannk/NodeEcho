@@ -7,6 +7,7 @@ NodeEcho is currently a design proposal. These notes capture research checked on
 | --- | --- |
 | [CloudNativePG analysis](cloudnative-pg.md) | Node dependencies, optional-watch work, topology, and integration points |
 | [Ecosystem research](ecosystem.md) | Kubernetes, Strimzi, ECK, Prometheus, and related approaches |
+| [Operators survey](operators.md) | What about twenty data and messaging operators read from Nodes, and whether NodeEcho would cover it |
 | [Design notes](design.md) | Proposed scope, data contract, consistency, permissions, and validation |
 
 The research uses primary project documentation, source code, and upstream

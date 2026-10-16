@@ -28,6 +28,44 @@ the initial CNPG use case.
 NodeEcho should not evict pods, change their readiness, control PostgreSQL, or
 infer an authoritative drain phase from the number of remaining pods.
 
+## Rules
+
+Proposal (2026-10-12): one key of an administrator-owned ConfigMap holds a list
+of rule objects. There is no default consumer: without a rule, NodeEcho does
+nothing. A CRD only if adoption calls for it.
+
+```yaml
+rules:
+- name: cnpg-instances          # required, unique: logs, metrics, field-manager suffix
+  namespaceSelector: {}         # label selector on namespaces; empty = all
+  podSelector:                  # required, never empty: the pods NodeEcho writes
+    matchLabels: {cnpg.io/podRole: instance}
+  nodeSelector: {}              # optional: only pods on matching nodes
+  drain:
+    enabled: true
+    domain: drain.example.org   # prefix of this rule's drain mark
+    taints: []                  # empty = default list, see "Drain mark"
+  labels:
+    copy: [topology.kubernetes.io/zone, rack.example.org/id]
+    target: labels              # or annotations (ECK reads annotations)
+    prefix: ""                  # optional: <prefix><key> for keys that could clash
+    forceKubernetesManaged: false
+```
+
+- Selection is on pods, since NodeEcho writes pods: `podSelector` is required;
+  `namespaceSelector` and `nodeSelector` only narrow it.
+- The drain domain and taint list are per rule, so each consumer reads the key
+  it configured and gets exactly its own maintenance policy; no shared naming
+  has to be agreed between consumers.
+- An invalid rule (missing name or `podSelector`, duplicate name, bad selector
+  or domain) is refused with a log line and a metric; valid rules keep running.
+  A ConfigMap has no status, so logs and metrics are the feedback channel.
+- Two rules on the same pod: label copies agree (same node value); drain marks
+  under different domains are both written; the same domain in two rules is
+  an invalid configuration.
+
+`example.org` keys are placeholders, as below.
+
 ## Facts and policies
 
 Publish node facts rather than a single universal `draining=true` decision:
@@ -41,6 +79,46 @@ Publish node facts rather than a single universal `draining=true` decision:
 
 Different CNPG installations can configure different `DRAIN_TAINTS`; embedding
 one fixed list in NodeEcho would couple the projection to one consumer policy.
+The rules above avoid that coupling with a per-rule taint list, so NodeEcho
+can also publish a consumer-specific drain mark next to the facts.
+
+### Drain mark
+
+For each rule with `drain.enabled`, on a node that is draining by that rule:
+
+- label `<domain>/node-draining: "true"` on every selected pod of the node,
+  removed (not set to `"false"`) when the node is schedulable again. A label,
+  so it can be selected (`kubectl get pods -l <domain>/node-draining`) and
+  watched with a label selector;
+- annotations `<domain>/node-draining-since` (first observation, RFC 3339) and
+  `<domain>/node-draining-reason` (`cordon` or `taint:<key>`; the `:` is why
+  these are annotations).
+
+Draining = `spec.unschedulable`, or a taint key in the rule's list. The default
+list is CloudNativePG's: `node.kubernetes.io/unschedulable`,
+`ToBeDeletedByClusterAutoscaler`, `karpenter.sh/disrupted`,
+`karpenter.sh/disruption`. Pods bound later to a draining node are marked too,
+and a full resync runs at startup. A consumer computing its own decision from
+the published facts can ignore the mark.
+
+### Copied labels and the Kubernetes version
+
+- Same key on the pod as on the node by default, as KEP-4742 does: consumers
+  configure the key they already know, and the same pod spec works with or
+  without NodeEcho. An optional `prefix` avoids clashes with a pod's own keys.
+- Labels or annotations per rule: ECK reads annotations, Strimzi, TiDB,
+  Percona MongoDB and CloudNativePG labels ([operators survey](operators.md)).
+- Values follow later node changes, whereas KEP-4742 copies once at binding;
+  this difference is documented.
+- On Kubernetes 1.35 and later (version read from `/version`, readable by
+  every authenticated client), the keys that Kubernetes copies itself
+  (`topology.kubernetes.io/zone` and `/region`, not `kubernetes.io/hostname`)
+  are left to Kubernetes by default. `forceKubernetesManaged` copies them
+  anyway, for clusters where the feature gate is off or distributions that
+  differ. Without it, a selected pod missing such a key while its node has it
+  gets a Warning Event and a metric: it signals the flag, it does not copy
+  silently. Keys that Kubernetes does not copy are always copied when
+  configured.
 
 ## Illustrative pod metadata
 
@@ -113,6 +191,7 @@ Expected runtime permissions:
 - Nodes: `list/watch`, plus `get` if the implementation performs direct reads.
 - Selected pods: `list/watch/patch`, plus `get` for direct reads if needed.
 - Leader-election Leases in the component namespace if high availability is used.
+- Events `create`, its own ConfigMap `get/watch`, nothing else.
 
 Ordinary Kubernetes RBAC does not restrict a pod `patch` grant to particular
 metadata keys or enforce arbitrary label-based object selection. Namespace
@@ -182,11 +261,24 @@ versions, with a direct-Node deployment as the reference:
 Information parity after convergence, timing differences, and behavior under
 projector failure should be reported separately.
 
+## Outside a per-pod projection
+
+- Node addresses (`status.addresses` by type) for NodePort-style listeners
+  (Strimzi, Koperator, Redpanda, Rook). They could be published as per-type
+  annotations; until then those listeners keep needing Node rights.
+- Cluster facts that are not per pod: distribution, Node count, capacity
+  (CockroachDB, MinIO, KubeBlocks, Flink). Most are optional or have an
+  override; see the [operators survey](operators.md).
+
 ## Open decisions
+
+- Project name domain for the metadata keys (placeholder `example.org`).
+- Drain output: the per-rule mark of the 2026-10-12 proposal, the raw facts of
+  this document, or both.
 
 - Implementation language and Kubernetes client framework.
 - Configuration format and whether a CRD is warranted.
-- Stable metadata prefix and schema versioning.
+- Schema versioning of the metadata.
 - Freshness, unknown-state, and deleted-source behavior.
 - Default collision and managed-key cleanup policy.
 - Supported CNPG integration/version strategy.

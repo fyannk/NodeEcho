@@ -21,6 +21,23 @@ Sources:
 - [KEP-4742](https://github.com/kubernetes/enhancements/issues/4742)
 - [KEP rendered by Kubernetes Contributors](https://www.kubernetes.dev/resources/keps/4742/)
 
+The list is fixed in the v1.35 code: the plugin copies only zone and region,
+**not** `kubernetes.io/hostname`, although the KEP text also names it
+([admission.go](https://github.com/kubernetes/kubernetes/blob/v1.35.0/plugin/pkg/admission/podtopologylabels/admission.go#L43-L45),
+[kube_features.go](https://github.com/kubernetes/kubernetes/blob/v1.35.0/pkg/features/kube_features.go#L1650-L1653)).
+Hostname and custom keys (racks, rooms, readiness labels) remain to be copied
+by another component.
+
+The binding subresource copies the Binding's annotations onto the pod and, with
+`PodTopologyLabelsAdmission` on, all of its labels
+([storage.go](https://github.com/kubernetes/kubernetes/blob/v1.35.0/pkg/registry/core/pod/storage/storage.go#L253-L260)).
+A mutating webhook on `pods/binding` can therefore add node metadata atomically
+at binding: Envoy Gateway copies the node zone into Binding annotations that way
+([topology_injector.go](https://github.com/envoyproxy/gateway/blob/f74a274b10/internal/provider/kubernetes/topology_injector.go#L77-L103)),
+and [issue #7443](https://github.com/envoyproxy/gateway/issues/7443) plans to
+replace it with KEP-4742. Annotations are proven by Envoy; labels are inferred
+from the 1.35 storage code only.
+
 The KEP explicitly discusses a helper controller and its inability to guarantee
 metadata is present before a pod starts. This distinction matters for consumers
 that read topology through environment variables.
@@ -153,6 +170,27 @@ Sources:
 - [Assigning Node Metadata to Pods](https://kyverno.io/blog/2024/02/19/assigning-node-metadata-to-pods/)
 - [Add scheduled node labels to a pod](https://github.com/kyverno/policies/blob/main/other/add-node-labels-pod/add-node-labels-pod.yaml)
 - [Mutate pod binding](https://kyverno.io/policies/other/mutate-pod-binding/mutate-pod-binding/)
+
+## Other operators
+
+The [operators survey](operators.md) reads the Node usage of about twenty
+operators. In short:
+
+- Most PostgreSQL, MySQL, Cassandra, Redis and messaging operators never read
+  Nodes (Crunchy PGO, the Percona PostgreSQL/MySQL operators, StackGres,
+  cass-operator, Vitess, RabbitMQ and others).
+- Those that do read **configurable label keys** for rack or zone awareness
+  (ECK, Strimzi, TiDB, Koperator, Redpanda, Percona MongoDB) or a
+  **cordon/drain signal** (Zalando: `spec.unschedulable` only; CloudNativePG:
+  `spec.unschedulable` plus taints; Redpanda and Rook: unschedulable, taints and
+  conditions).
+- Some needs are out of reach of a per-pod projection: node addresses for
+  NodePort-style listeners (Strimzi, Koperator, Redpanda, Rook), and cluster
+  facts such as the distribution, the Node count or the capacity (CockroachDB,
+  MinIO, MongoDB telemetry, KubeBlocks, Flink).
+- Strimzi and Redpanda grant Node rights to their *operand* pods, so the
+  operator must be able to create ClusterRoleBindings; a projection would remove
+  that escalation path too.
 
 ## Implications for NodeEcho
 
