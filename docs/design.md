@@ -41,10 +41,13 @@ rules:
   podSelector:                  # required, never empty: the pods NodeEcho writes
     matchLabels: {cnpg.io/podRole: instance}
   nodeSelector: {}              # optional: only pods on matching nodes
-  drain:
-    enabled: true
-    domain: nodeecho.fyannk.dev # prefix of this rule's drain mark (default)
-    taints: []                  # empty = default list, see "Drain mark"
+  unschedulable:                # echo spec.unschedulable; omit the block to skip
+    key: nodeecho.fyannk.dev/unschedulable   # default
+    target: labels              # or annotations
+  taints:                       # echo the listed taints; omit the block to skip
+    copy: [node.kubernetes.io/unschedulable, ToBeDeletedByClusterAutoscaler,
+           karpenter.sh/disrupted, karpenter.sh/disruption]
+    key: nodeecho.fyannk.dev/taints          # default; always an annotation
   labels:
     copy: [topology.kubernetes.io/zone, rack.example.org/id]
     target: labels              # or annotations (ECK reads annotations)
@@ -58,20 +61,18 @@ rules:
 
 - Selection is on pods, since NodeEcho writes pods: `podSelector` is required;
   `namespaceSelector` and `nodeSelector` only narrow it.
-- The drain domain and taint list are per rule, so each consumer reads the key
-  it configured and gets exactly its own maintenance policy; no shared naming
-  has to be agreed between consumers.
+- The taint list and the destination keys are per rule, so each consumer
+  echoes the taints it needs under the keys it reads.
 - An invalid rule (missing name or `podSelector`, duplicate name, bad selector
-  or domain) is refused with a log line and a metric; valid rules keep running.
+  or key) is refused with a log line and a metric; valid rules keep running.
   A ConfigMap has no status, so logs and metrics are the feedback channel.
 - Node labels and node annotations are separate sources, each with its own
   block, see [Copied annotations](#copied-annotations). Within one rule, two
   copies resolving to the same pod key (a node label and a node annotation of
   the same name, or a `prefix` making them collide) are an invalid rule.
 - Two rules on the same pod: copies of the same source agree (same node
-  value); drain marks under different domains are both written; the same
-  domain in two rules is an invalid configuration, so at most one rule can
-  keep the default domain.
+  value). The same `unschedulable` or `taints` key in two rules is an invalid
+  configuration, so at most one rule keeps each default key.
 
 NodeEcho's own keys use the project domain `nodeecho.fyannk.dev`.
 `example.org` keys stand for other parties' keys (a consumer's or an
@@ -79,7 +80,9 @@ administrator's).
 
 ## Facts and policies
 
-Publish node facts rather than a single universal `draining=true` decision:
+NodeEcho echoes node facts and interprets nothing: it never decides that a
+node is draining. Whether a cordon or a taint means maintenance is the
+consumer's policy:
 
 | Published fact | Consumer responsibility |
 | --- | --- |
@@ -88,29 +91,30 @@ Publish node facts rather than a single universal `draining=true` decision:
 | Topology labels | Apply the consumer's failure-domain policy |
 | Source identity and freshness information | Decide whether context is usable |
 
-Different CNPG installations can configure different `DRAIN_TAINTS`; embedding
-one fixed list in NodeEcho would couple the projection to one consumer policy.
-The rules above avoid that coupling with a per-rule taint list, so NodeEcho
-can also publish a consumer-specific drain mark next to the facts.
+### Unschedulable and taints
 
-### Drain mark
+Both are plain echoes of the Node spec, written on every selected pod of the
+node:
 
-For each rule with `drain.enabled`, on a node that is draining by that rule:
+- `unschedulable`: `"true"` while `spec.unschedulable` is true, removed
+  otherwise, as the Node itself omits the field. A label by default, so it can
+  be selected (`kubectl get pods -l nodeecho.fyannk.dev/unschedulable`).
+- `taints`: an annotation holding a JSON array of the node's taints whose key
+  is in the rule's `copy` list, each object as in `Node.spec.taints` (`key`,
+  `value` when set, `effect`, `timeAdded` when set), in Node order; removed
+  when none is present. An annotation, because taint keys contain `/` and the
+  array has no label-safe form.
 
-- label `<domain>/node-draining: "true"` on every selected pod of the node,
-  removed (not set to `"false"`) when the node is schedulable again. A label,
-  so it can be selected (`kubectl get pods -l <domain>/node-draining`) and
-  watched with a label selector;
-- annotations `<domain>/node-draining-since` (first observation, RFC 3339) and
-  `<domain>/node-draining-reason` (`cordon` or `taint:<key>`; the `:` is why
-  these are annotations).
+Nothing is written for a schedulable, untainted node, so most pods carry
+neither key. The absence of both therefore also covers "not projected yet";
+telling the two apart is part of the freshness and unknown-state decision
+below.
 
-Draining = `spec.unschedulable`, or a taint key in the rule's list. The default
-list is CloudNativePG's: `node.kubernetes.io/unschedulable`,
-`ToBeDeletedByClusterAutoscaler`, `karpenter.sh/disrupted`,
-`karpenter.sh/disruption`. Pods bound later to a draining node are marked too,
-and a full resync runs at startup. A consumer computing its own decision from
-the published facts can ignore the mark.
+There is no default taint list and no wildcard: only listed keys are echoed.
+The example above is CloudNativePG's default `DRAIN_TAINTS`; a consumer
+configured with another list needs the same list in its rule. Pods bound
+later get the keys when their node is known, and a full resync runs at
+startup.
 
 ### Copied labels and the Kubernetes version
 
@@ -151,9 +155,9 @@ the published facts can ignore the mark.
 
 ## Illustrative pod metadata
 
-Keys use the project domain `nodeecho.fyannk.dev`. A rule's `drain.domain`
-lets an administrator publish the drain mark under another prefix, for a
-consumer that already reads its own key.
+Keys use the project domain `nodeecho.fyannk.dev`. A rule's `key` fields
+let an administrator publish under other keys, for a consumer that already
+reads its own.
 
 ```yaml
 metadata:
@@ -302,8 +306,6 @@ projector failure should be reported separately.
 
 ## Open decisions
 
-- Drain output: the per-rule mark of the 2026-10-12 proposal, the raw facts of
-  this document, or both.
 
 - Implementation language and Kubernetes client framework.
 - Configuration format and whether a CRD is warranted.

@@ -186,12 +186,12 @@ from pod-projected context. This is a design suggestion, not an existing API.
 
 ### Smallest consumer change
 
-The drain side needs only an alternative source for the predicate above: read
-the NodeEcho drain mark from the instance pod (the primary and every switchover
-candidate) instead of the Node, for example through a setting naming the mark's
-prefix (`NODE_DRAIN_ANNOTATION_PREFIX` is a placeholder) and an optional
-maximum age after which a mark is treated as unknown. The `DRAIN_TAINTS` list
-then moves to the NodeEcho rule of that consumer, and both must stay identical.
+The drain side needs only an alternative source for the predicate above:
+evaluate it on the `unschedulable` and `taints` keys that NodeEcho echoes on
+the instance pod (the primary and every switchover candidate) instead of on
+the Node, for example through a setting naming those keys
+(`NODE_INFO_PREFIX` is a placeholder). CNPG keeps its `DRAIN_TAINTS` policy;
+the NodeEcho rule must echo at least those taint keys.
 
 The topology side needs no new code: copy the node labels onto the instance
 pods under the same keys and use `podFailureDomainKeys`, which the development
