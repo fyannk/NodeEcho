@@ -19,7 +19,8 @@ Planned capabilities include:
 - Write nothing when there is nothing to echo, and never overwrite another writer's keys.
 
 **Status: early implementation.** Contract v1 is drafted and implemented,
-tested against a real API server (envtest); not yet run on a cluster. Upstream
+tested against a real API server (envtest) and end to end on k3d clusters
+(Kubernetes 1.34, 1.36, and 1.36 with `PodTopologyLabelsAdmission` off). Upstream
 CloudNativePG does not automatically consume NodeEcho metadata; an integration
 is required. Compatibility with individual forks remains to be validated.
 
@@ -36,11 +37,18 @@ identified separately from released behavior.
 Go and controller-runtime; `make help` lists the targets.
 
 ```sh
-make test     # unit tests
+make test     # unit, fuzz-seed and envtest tests
 make lint     # golangci-lint and the toolchain check
 make build    # bin/nodeecho
+make e2e      # end-to-end on throwaway k3d clusters: 1.34, 1.36, 1.36 with
+              # PodTopologyLabelsAdmission off; needs docker, k3d, kubectl, jq
 make deploy   # kustomize config/default into nodeecho-system
 ```
+
+`make e2e` uses its own kubeconfig per cluster and never touches the default
+one. Set `E2E_NETWORK` to attach the k3d nodes to an existing Docker network,
+for instance one that reaches an HTTP proxy; see `hack/e2e.sh` for the other
+settings.
 
 ## License
 
