@@ -44,9 +44,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    # A GitHub Pages site is public even for a private repository, so the
-    # site is published only while the repository itself is public.
-    if: github.event_name == 'push' && github.event.repository.visibility == 'public'
+    if: github.event_name == 'push'
     needs: build
     permissions:
       pages: write # publish the built site
