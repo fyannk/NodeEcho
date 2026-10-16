@@ -120,6 +120,10 @@ owns_label() {
 		'any(.metadata.managedFields[]?; .manager == $m and .operation == "Apply" and ((.fieldsV1."f:metadata"."f:labels" // {}) | has($k)))' >/dev/null
 }
 
+event_says() {
+	k get events -n "$NS" --field-selector "involvedObject.name=$1,reason=$2" -o json |
+		jq -e --arg m "$3" 'any(.items[]; .message | contains($m))' >/dev/null
+}
 has_event() { [[ -n $(k get events -n "$NS" --field-selector "involvedObject.name=$1,reason=$2" -o name) ]]; }
 
 node_label() { k get node "$1" -o json | jq -r --arg k "$2" '.metadata.labels[$k] // "<absent>"'; }
@@ -141,6 +145,33 @@ leader_not_ready() {
 }
 metrics() { k get --raw "/api/v1/namespaces/$SYS/pods/$(leader):8080/proxy/metrics"; }
 metric_is() { metrics | grep -qx "$1 $2"; }
+
+policy_checked() { k get validatingadmissionpolicy "$1" -o json | jq -e '.status.typeChecking != null' >/dev/null; }
+
+# as_nodeecho <method> <pod> [merge patch]: calls the API server with a token
+# of NodeEcho's ServiceAccount, which has no get right, so kubectl, which
+# reads before it writes, cannot be used. Prints the response, fails unless
+# the call succeeded.
+as_nodeecho() {
+	local server ca token code
+	server=$(k config view --minify --raw -o jsonpath='{.clusters[0].cluster.server}')
+	ca=$WORK/$CLUSTER.ca
+	k config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$ca"
+	token=$(k create token nodeecho -n "$SYS" --duration=10m)
+	local args=(-sS --cacert "$ca" -H "Authorization: Bearer $token" -X "$1" -o "$WORK/response" -w '%{http_code}')
+	[[ -n ${3:-} ]] && args+=(-H "Content-Type: application/merge-patch+json" --data "$3")
+	code=$(curl "${args[@]}" "$server/api/v1/namespaces/$NS/pods/$2${4:-}")
+	cat "$WORK/response"
+	[[ $code == 2* ]]
+}
+
+# denied <expected message> <command...>
+denied() {
+	local want=$1 out
+	shift
+	if out=$("$@" 2>&1); then return 1; fi
+	grep -q "$want" <<<"$out"
+}
 
 resource_versions() { k get pods -n "$NS" -l spread=db -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.resourceVersion} {end}'; }
 rv_unchanged() { [[ $(resource_versions) == "$RV_BEFORE" ]]; }
@@ -227,8 +258,21 @@ resources:
 images:
   - name: nodeecho
     newTag: e2e
+patches:
+  - target: {kind: ValidatingAdmissionPolicy, name: nodeecho-writer-scope}
+    patch: |-
+      - op: replace
+        path: /spec/variables/0/expression
+        value: "['nodeecho.fyannk.dev/', 'topology.kubernetes.io/zone', 'topology.kubernetes.io/region', 'rack.example.org/', 'e2e.example.org/']"
 EOF
 	k apply -k "$overlay" >/dev/null
+	local warnings
+	for p in nodeecho-reserved-keys nodeecho-writer-scope; do
+		TIMEOUT=30 wait_for "policy $p type-checked" policy_checked "$p"
+		warnings=$(k get validatingadmissionpolicy "$p" -o json | jq -r '.status.typeChecking.expressionWarnings // [] | .[] | "\(.fieldRef): \(.warning)"')
+		[[ -z $warnings ]] || fail "policy $p warnings: $warnings"
+	done
+	ok "policies compile without warnings"
 	TIMEOUT=120 wait_for "NodeEcho rolled out" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
 }
 
@@ -364,6 +408,61 @@ scenario_policy() {
 	ok "creating a pod with a reserved label is denied"
 	k uncordon "$(node_of db-0)" >/dev/null
 	wait_for "uncordon still removes it" label_absent db-0 nodeecho.fyannk.dev/unschedulable
+}
+
+scenario_writer_scope() {
+	echo "- admission policy limiting NodeEcho's own writes"
+	meta() { as_nodeecho PATCH db-0 "{\"metadata\":$1}"; }
+	meta '{"labels":{"e2e.example.org/probe":"1"}}' >/dev/null || fail "an allowed key is denied"
+	meta '{"labels":{"e2e.example.org/probe":null}}' >/dev/null || fail "removing an allowed key is denied"
+	ok "allowed keys can be written and removed"
+	denied "may not change app" meta '{"labels":{"app":"hijacked"}}' || fail "NodeEcho could change a selector label"
+	ok "changing a label outside the allowed list is denied"
+	denied "may not change" meta '{"annotations":{"note":"x"}}' || fail "NodeEcho could add an annotation"
+	ok "adding an annotation outside the allowed list is denied"
+	denied "spec" as_nodeecho PATCH db-0 '{"spec":{"activeDeadlineSeconds":36000}}' ||
+		fail "NodeEcho could change a pod spec"
+	ok "changing a pod spec is denied"
+	denied "finalizers" meta '{"finalizers":["example.org/hold"]}' ||
+		fail "NodeEcho could add a finalizer"
+	ok "adding a finalizer is denied"
+	denied "forbidden" as_nodeecho DELETE db-0 "" "?dryRun=All" || fail "NodeEcho could delete a pod"
+	ok "deleting a pod is denied"
+
+	(db_rules "$FORCE" && cat <<RULES
+- name: outside
+  podSelector: {matchLabels: {app: e2e-db}}
+  labels: {copy: [rack.example.org/id], prefix: outside.}
+RULES
+	) | set_rules
+	wait_for "a rule writing outside the allowed list gets a Warning Event" event_says db-0 KeySkipped "rule outside: write rejected"
+	label_absent db-0 outside.rack.example.org/id || fail "the key outside the allowed list was written"
+	db_rules "$FORCE" | set_rules
+	wait_for "rule removed" metric_is nodeecho_rules_active 2
+}
+
+scenario_heavy_pod() {
+	echo "- the policies on a large pod: 20 containers x 100 env vars, 1000 annotations"
+	jq -n --arg image "$PAUSE" '{
+		apiVersion: "v1", kind: "Pod",
+		metadata: {name: "heavy", labels: {app: "e2e-db"},
+			annotations: ([range(1000)] | map({key: "e2e.example.org/a\(.)", value: "value-\(.)"}) | from_entries)},
+		spec: {terminationGracePeriodSeconds: 0,
+			containers: [range(20)] | map({name: "c\(.)", image: $image,
+				env: ([range(100)] | map({name: "V\(.)", value: "x"}))})}
+	}' | k apply -n "$NS" -f - >/dev/null || fail "the policies reject a large pod"
+	ok "a large pod is created"
+	TIMEOUT=120 wait_for "the large pod runs" pod_running heavy
+	wait_for "NodeEcho writes on the large pod" label_is heavy rack.example.org/id "$(node_label "$(node_of heavy)" rack.example.org/id)"
+	k annotate pod -n "$NS" heavy e2e.example.org/a0=changed --overwrite >/dev/null || fail "updating a large pod is rejected"
+	ok "updating a large pod passes the reserved-keys policy"
+	k cordon "$(node_of heavy)" >/dev/null
+	wait_for "NodeEcho's writes on the large pod pass the writer-scope policy" label_is heavy nodeecho.fyannk.dev/unschedulable true
+	k uncordon "$(node_of heavy)" >/dev/null
+	wait_for "and are removed" label_absent heavy nodeecho.fyannk.dev/unschedulable
+	k delete pod -n "$NS" heavy --wait=false >/dev/null
+	k rollout restart -n "$NS" deployment/web >/dev/null
+	TIMEOUT=120 wait_for "a rolling update of unrelated pods completes under both policies" k rollout status -n "$NS" deployment/web --timeout=5s
 }
 
 scenario_foreign() {
@@ -547,6 +646,8 @@ run_variant() {
 	scenario_healthy "$variant"
 	scenario_cordon_taint_label
 	scenario_policy
+	scenario_writer_scope
+	scenario_heavy_pod
 	scenario_foreign
 	scenario_metrics
 	scenario_restart

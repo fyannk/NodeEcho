@@ -1,4 +1,7 @@
-# Optional: reserve the nodeecho.fyannk.dev/ keys on pods for NodeEcho's
-# ServiceAccount, see docs/contract.md ("Protection").
+# Optional admission policies, see docs/contract.md ("Protection"):
+# reserved_keys.yaml reserves the nodeecho.fyannk.dev/ keys on pods for
+# NodeEcho's ServiceAccount; writer_scope.yaml limits that ServiceAccount to
+# the keys it is allowed to write.
 resources:
   - reserved_keys.yaml
+  - writer_scope.yaml

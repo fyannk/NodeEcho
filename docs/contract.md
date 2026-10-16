@@ -169,11 +169,25 @@ past 1.35.
 
 ## Protection
 
-Pod `patch` rights cannot be limited to some keys, so anyone able to edit a
-pod could forge an echoed value. NodeEcho ships an optional
-`ValidatingAdmissionPolicy` that rejects changes to `nodeecho.fyannk.dev/*`
-labels and annotations from any identity other than NodeEcho's
-ServiceAccount. Administrators extend it to the custom keys their rules write.
+Pod `patch` rights cannot be limited to some keys. NodeEcho ships two
+optional `ValidatingAdmissionPolicy` objects, in `config/policy`, for both
+directions:
+
+- `nodeecho-reserved-keys`: anyone able to edit a pod could forge an echoed
+  value. The policy rejects creating, changing or removing
+  `nodeecho.fyannk.dev/*` labels and annotations from any identity other than
+  NodeEcho's ServiceAccount.
+- `nodeecho-writer-scope`: NodeEcho's own `patch` right would let it rewrite
+  any pod, images included, or change the labels Services and
+  NetworkPolicies select on. The policy limits its ServiceAccount to updating
+  pods, never their spec, owner references or finalizers, and to changing
+  only the labels and annotations listed in the policy. A write outside the
+  list is rejected, and NodeEcho reports it as a skipped key with a Warning
+  Event.
+
+Administrators extend both lists to the custom keys their rules write. Both
+name the ServiceAccount `nodeecho` in `nodeecho-system`; installing NodeEcho
+elsewhere means editing them.
 
 ## Compatibility
 

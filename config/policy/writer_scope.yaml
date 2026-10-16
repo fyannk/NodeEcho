@@ -1,0 +1,65 @@
+# Limits what NodeEcho's own ServiceAccount can do with its pod patch right:
+# update pods only, never their spec, owner references or finalizers, and
+# change only the labels and annotations listed in `allowed`. Its RBAC alone
+# would let it rewrite any pod, images included.
+#
+# `allowed` holds exact keys, or prefixes ending in "/". It must list every
+# destination key of the rules: a write outside it is rejected, and NodeEcho
+# reports it as a skipped key with a Warning Event. The ServiceAccount name
+# assumes the nodeecho-system namespace.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: nodeecho-writer-scope
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: ["*"]
+        resources: [pods, pods/*]
+  matchConditions:
+    - name: nodeecho-only
+      expression: request.userInfo.username == "system:serviceaccount:nodeecho-system:nodeecho"
+  variables:
+    - name: allowed
+      expression: "['nodeecho.fyannk.dev/']"
+    - name: newMeta
+      expression: >-
+        [has(object.metadata.labels) ? object.metadata.labels : {},
+         has(object.metadata.annotations) ? object.metadata.annotations : {}]
+    - name: oldMeta
+      expression: >-
+        [has(oldObject.metadata.labels) ? oldObject.metadata.labels : {},
+         has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}]
+    - name: changed
+      expression: >-
+        [0, 1].map(i,
+          variables.newMeta[i].filter(k, !(k in variables.oldMeta[i]) || variables.oldMeta[i][k] != variables.newMeta[i][k]) +
+          variables.oldMeta[i].filter(k, !(k in variables.newMeta[i])))
+    - name: denied
+      expression: >-
+        (variables.changed[0] + variables.changed[1]).filter(k,
+          !variables.allowed.exists(a, a.endsWith('/') ? k.startsWith(a) : k == a))
+  validations:
+    - expression: request.operation == 'UPDATE' && (!has(request.subResource) || request.subResource == '')
+      message: NodeEcho may only update pods
+    - expression: object.spec == oldObject.spec
+      message: NodeEcho may not change a pod's spec
+    - expression: >-
+        (has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) ==
+          (has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : []) &&
+        (has(object.metadata.finalizers) ? object.metadata.finalizers : []) ==
+          (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : [])
+      message: NodeEcho may not change owner references or finalizers
+    - expression: size(variables.denied) == 0
+      messageExpression: "'NodeEcho may not change ' + variables.denied.join(', ') + '; add the key to the allowed list of nodeecho-writer-scope'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: nodeecho-writer-scope
+spec:
+  policyName: nodeecho-writer-scope
+  validationActions: [Deny]
