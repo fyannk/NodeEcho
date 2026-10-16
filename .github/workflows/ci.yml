@@ -25,6 +25,9 @@ jobs:
 
       - run: go build ./...
       - run: go vet ./...
+      # The controller tests run against a real API server (envtest).
+      - name: Install envtest binaries
+        run: echo "KUBEBUILDER_ASSETS=$(make -s envtest-assets)" >> "$GITHUB_ENV"
       - run: go test ./... -race -count=1
 
   lint:

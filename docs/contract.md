@@ -142,8 +142,13 @@ running, when:
 - two of its keys resolve to the same pod key;
 - its `unschedulable.key` or `taints.key` is also used by another rule.
 
-An unknown `version` refuses the whole configuration and NodeEcho keeps the
-last valid one.
+A refused rule whose name was running keeps its last valid version, so that a
+typo does not remove its keys from every pod.
+
+An unknown `version`, a document that does not parse, or a missing ConfigMap
+or key refuses the whole configuration, and NodeEcho keeps the last valid one.
+To stop writing, set `rules: []`. Until a first valid configuration is
+loaded, NodeEcho writes and removes nothing and reports not ready.
 
 ## Protection
 

@@ -26,8 +26,15 @@ lint: ## Run golangci-lint and the repository checks.
 	./hack/check-go-version.sh
 
 .PHONY: test
-test: fmt vet ## Run unit tests.
-	go test ./... -coverprofile cover.out
+ENVTEST_K8S_VERSION ?= 1.36.2
+ENVTEST = go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
+
+test: fmt vet ## Run unit and envtest tests.
+	KUBEBUILDER_ASSETS="$$($(MAKE) -s envtest-assets)" go test ./... -coverprofile cover.out
+
+.PHONY: envtest-assets
+envtest-assets: ## Print the envtest binaries path, downloading them if needed.
+	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path
 
 .PHONY: vuln
 vuln: ## Scan the Go dependency graph for known vulnerabilities.

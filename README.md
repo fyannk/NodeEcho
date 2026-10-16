@@ -18,9 +18,8 @@ Planned capabilities include:
 - Limit propagation to selected namespaces and workloads.
 - Write nothing when there is nothing to echo, and never overwrite another writer's keys.
 
-**Status: early implementation.** Contract v1 is drafted; configuration
-parsing and the projection are implemented and tested, the reconciler is not
-yet. Upstream
+**Status: early implementation.** Contract v1 is drafted and implemented,
+tested against a real API server (envtest); not yet run on a cluster. Upstream
 CloudNativePG does not automatically consume NodeEcho metadata; an integration
 is required. Compatibility with individual forks remains to be validated.
 

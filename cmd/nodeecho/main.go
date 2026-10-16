@@ -20,16 +20,30 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
+	"errors"
 	"flag"
+	"fmt"
+	"net/http"
 	"os"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	kubeversion "k8s.io/apimachinery/pkg/util/version"
+	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"github.com/fyannk/nodeecho/internal/controller"
+	"github.com/fyannk/nodeecho/internal/projection"
 )
 
 var (
@@ -43,8 +57,11 @@ func init() {
 }
 
 func main() {
-	var metricsAddr, probeAddr string
+	var metricsAddr, probeAddr, configName, configNamespace string
 	var leaderElect bool
+	flag.StringVar(&configName, "config-name", "nodeecho", "Name of the rules ConfigMap.")
+	flag.StringVar(&configNamespace, "config-namespace", os.Getenv("POD_NAMESPACE"),
+		"Namespace of the rules ConfigMap, NodeEcho's own namespace (default $POD_NAMESPACE).")
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address the metrics endpoint binds to; \"0\" disables it.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Address the health probes bind to.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election, for more than one replica.")
@@ -53,8 +70,24 @@ func main() {
 	flag.Parse()
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
+	if configNamespace == "" {
+		setupLog.Error(errors.New("no namespace"), "set --config-namespace or POD_NAMESPACE")
+		os.Exit(1)
+	}
+
+	restConfig := ctrl.GetConfigOrDie()
+	copiesTopology, err := kubernetesCopiesTopology(restConfig)
+	if err != nil {
+		setupLog.Error(err, "unable to read the Kubernetes version")
+		os.Exit(1)
+	}
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
+		Scheme: scheme,
+		// NodeEcho reads ConfigMaps in its own namespace only.
+		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
+			&corev1.ConfigMap{}: {Namespaces: map[string]cache.Config{configNamespace: {}}},
+		}},
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
@@ -65,18 +98,67 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx := ctrl.SetupSignalHandler()
+	store := &controller.Store{}
+	resync := make(chan event.GenericEvent)
+	if err := (&controller.ConfigReconciler{
+		Client:    mgr.GetClient(),
+		ConfigMap: types.NamespacedName{Namespace: configNamespace, Name: configName},
+		Store:     store,
+		Resync:    resync,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to set up the rules controller")
+		os.Exit(1)
+	}
+	if err := (&controller.PodReconciler{
+		Client:   mgr.GetClient(),
+		Store:    store,
+		Recorder: mgr.GetEventRecorder("nodeecho"),
+		Options:  projection.Options{KubernetesCopiesTopology: copiesTopology},
+		Resync:   resync,
+	}).SetupWithManager(ctx, mgr); err != nil {
+		setupLog.Error(err, "unable to set up the pod controller")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up the health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	// Ready once a valid configuration is loaded: before that, NodeEcho
+	// writes nothing.
+	if err := mgr.AddReadyzCheck("readyz", func(*http.Request) error {
+		if !store.Loaded() {
+			return errors.New("no valid configuration loaded")
+		}
+		return nil
+	}); err != nil {
 		setupLog.Error(err, "unable to set up the ready check")
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager", "version", version)
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	setupLog.Info("starting manager", "version", version,
+		"configMap", configNamespace+"/"+configName, "kubernetesCopiesTopology", copiesTopology)
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "manager stopped")
 		os.Exit(1)
 	}
+}
+
+// kubernetesCopiesTopology reports whether the API server is 1.35 or later,
+// where Kubernetes copies the zone and region Node labels onto pods.
+func kubernetesCopiesTopology(cfg *rest.Config) (bool, error) {
+	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return false, err
+	}
+	info, err := dc.ServerVersion()
+	if err != nil {
+		return false, err
+	}
+	v, err := kubeversion.ParseGeneric(info.GitVersion)
+	if err != nil {
+		return false, fmt.Errorf("parsing %q: %w", info.GitVersion, err)
+	}
+	return v.AtLeast(kubeversion.MajorMinor(1, 35)), nil
 }
