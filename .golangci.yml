@@ -1,0 +1,19 @@
+version: "2"
+
+# Report every finding, not a sample of each kind.
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosec
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec

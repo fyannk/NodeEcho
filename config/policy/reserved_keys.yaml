@@ -1,0 +1,47 @@
+# Rejects pod creations and updates that add, change or remove a
+# nodeecho.fyannk.dev/ label or annotation, unless NodeEcho makes them.
+# Status and binding subresources are not matched. Extend the prefix list
+# with the custom keys your rules write.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: nodeecho-reserved-keys
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: not-nodeecho
+      expression: request.userInfo.username != "system:serviceaccount:nodeecho-system:nodeecho"
+  variables:
+    - name: prefixes
+      expression: "['nodeecho.fyannk.dev/']"
+    - name: newMeta
+      expression: >-
+        [has(object.metadata.labels) ? object.metadata.labels : {},
+         has(object.metadata.annotations) ? object.metadata.annotations : {}]
+    - name: oldMeta
+      expression: >-
+        request.operation == 'CREATE' ? [{}, {}] :
+        [has(oldObject.metadata.labels) ? oldObject.metadata.labels : {},
+         has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}]
+  validations:
+    - expression: >-
+        [0, 1].all(i,
+          variables.newMeta[i].all(k, !variables.prefixes.exists(p, k.startsWith(p)) ||
+            (k in variables.oldMeta[i] && variables.oldMeta[i][k] == variables.newMeta[i][k])) &&
+          variables.oldMeta[i].all(k, !variables.prefixes.exists(p, k.startsWith(p)) ||
+            k in variables.newMeta[i]))
+      message: nodeecho.fyannk.dev/ labels and annotations are written by NodeEcho only
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: nodeecho-reserved-keys
+spec:
+  policyName: nodeecho-reserved-keys
+  validationActions: [Deny]

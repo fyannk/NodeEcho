@@ -1,0 +1,10 @@
+# The rules NodeEcho applies, see docs/contract.md ("Configuration").
+# Without a rule NodeEcho writes nothing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nodeecho
+data:
+  rules.yaml: |
+    version: 1
+    rules: []

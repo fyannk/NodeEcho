@@ -1,0 +1,14 @@
+# Binaries and build outputs
+/bin/
+/dist/
+
+# Test coverage
+cover.out
+*.coverprofile
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store

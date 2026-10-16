@@ -232,6 +232,7 @@ is centralizing that access rather than eliminating it from the cluster.
 Expected runtime permissions:
 
 - Nodes: `list/watch`, plus `get` if the implementation performs direct reads.
+- Namespaces: `list/watch`, for `namespaceSelector`.
 - Selected pods: `list/watch/patch`, plus `get` for direct reads if needed.
 - Leader-election Leases in the component namespace if high availability is used.
 - Events `create`, its own ConfigMap `get/watch`, nothing else.

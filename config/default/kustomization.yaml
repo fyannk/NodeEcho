@@ -1,0 +1,7 @@
+# NodeEcho in the nodeecho-system namespace, with its rules ConfigMap.
+# The admission policy under config/policy is optional and applied apart.
+namespace: nodeecho-system
+resources:
+  - namespace.yaml
+  - ../rbac
+  - ../manager

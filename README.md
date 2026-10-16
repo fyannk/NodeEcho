@@ -18,7 +18,9 @@ Planned capabilities include:
 - Limit propagation to selected namespaces and workloads.
 - Write nothing when there is nothing to echo, and never overwrite another writer's keys.
 
-**Status: research and design. No controller is implemented yet.** Upstream
+**Status: early implementation.** Contract v1 is drafted; configuration
+parsing and the projection are implemented and tested, the reconciler is not
+yet. Upstream
 CloudNativePG does not automatically consume NodeEcho metadata; an integration
 is required. Compatibility with individual forks remains to be validated.
 
@@ -29,3 +31,18 @@ custom metadata, and compatibility needs beyond that native feature.
 See [the documentation](docs/README.md) for the research, sources, and proposed
 design. Research was checked on **2026-10-16**; development-branch features are
 identified separately from released behavior.
+
+## Development
+
+Go and controller-runtime; `make help` lists the targets.
+
+```sh
+make test     # unit tests
+make lint     # golangci-lint and the toolchain check
+make build    # bin/nodeecho
+make deploy   # kustomize config/default into nodeecho-system
+```
+
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE).

@@ -134,7 +134,10 @@ rules:
 A rule is refused, with a log line and a metric, while the other rules keep
 running, when:
 
-- `name` is missing or duplicated, or `podSelector` is missing or empty;
+- `name` is missing, duplicated or not a DNS-1123 label, or `podSelector` is
+  missing or empty;
+- it has no `unschedulable`, `taints`, `labels` or `annotations` block, or a
+  block's `copy` list is empty or repeats a key;
 - a selector or a destination key is invalid;
 - two of its keys resolve to the same pod key;
 - its `unschedulable.key` or `taints.key` is also used by another rule.

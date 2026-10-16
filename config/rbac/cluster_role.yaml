@@ -1,0 +1,30 @@
+# Cluster-wide rights, as listed in docs/design.md ("Permissions and trust").
+# Pod patch rights can be narrowed to selected namespaces by replacing the
+# pods rule with namespaced RoleBindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nodeecho
+rules:
+  - apiGroups: [""]
+    resources: [nodes, namespaces]
+    verbs: [list, watch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [list, watch, patch]
+  - apiGroups: ["", events.k8s.io]
+    resources: [events]
+    verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nodeecho
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nodeecho
+subjects:
+  - kind: ServiceAccount
+    name: nodeecho
+    namespace: nodeecho-system
