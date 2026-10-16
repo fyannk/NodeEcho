@@ -84,10 +84,9 @@ func main() {
 
 	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme: scheme,
-		// NodeEcho reads ConfigMaps in its own namespace only.
-		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
-			&corev1.ConfigMap{}: {Namespaces: map[string]cache.Config{configNamespace: {}}},
-		}},
+		// NodeEcho reads ConfigMaps in its own namespace only, and caches
+		// pods, Nodes and Namespaces stripped to what it reads.
+		Cache:                  cache.Options{ByObject: cacheOptions(configNamespace)},
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
@@ -153,6 +152,12 @@ func main() {
 		setupLog.Error(err, "manager stopped")
 		os.Exit(1)
 	}
+}
+
+func cacheOptions(configNamespace string) map[client.Object]cache.ByObject {
+	opts := controller.CacheOptions()
+	opts[&corev1.ConfigMap{}] = cache.ByObject{Namespaces: map[string]cache.Config{configNamespace: {}}}
+	return opts
 }
 
 // kubernetesCopiesTopology reports whether the API server is 1.35 or later,

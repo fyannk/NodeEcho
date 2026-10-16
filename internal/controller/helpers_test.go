@@ -29,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/fyannk/nodeecho/internal/config"
@@ -252,5 +253,65 @@ func TestStoreDoesNotKeepARuleWhoseKeyIsTaken(t *testing.T) {
 	changed, kept, _ := s.Set(valid, refused)
 	if !changed || len(kept) != 0 || !slices.Equal(names(s.Rules()), []string{"b"}) {
 		t.Errorf("changed=%v kept=%v rules=%v, want b alone", changed, kept, names(s.Rules()))
+	}
+}
+
+func TestStripKeepsWhatNodeEchoReads(t *testing.T) {
+	now := metav1.Now()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "p", Namespace: "n", UID: "u", ResourceVersion: "7", DeletionTimestamp: &now,
+			Labels: map[string]string{"a": "1"}, Annotations: map[string]string{"b": "2"},
+			OwnerReferences: []metav1.OwnerReference{{Name: "rs"}},
+			ManagedFields: []metav1.ManagedFieldsEntry{
+				managed("nodeecho/db", "Apply", `{"f:metadata":{"f:labels":{"f:a":{}}}}`),
+				managed("kube-controller-manager", "Update", `{"f:spec":{}}`),
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "c", Image: "i"}}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	got, _ := stripPod(pod)
+	p := got.(*corev1.Pod)
+	if p.Name != "p" || p.Namespace != "n" || p.UID != "u" || p.ResourceVersion != "7" || p.DeletionTimestamp == nil ||
+		!maps.Equal(p.Labels, pod.Labels) || !maps.Equal(p.Annotations, pod.Annotations) || p.Spec.NodeName != "node" {
+		t.Errorf("stripped pod lost a field NodeEcho reads: %+v", p)
+	}
+	if len(p.Spec.Containers) != 0 || p.Status.Phase != "" || len(p.OwnerReferences) != 0 {
+		t.Errorf("stripped pod kept spec, status or owners: %+v", p)
+	}
+	if len(p.ManagedFields) != 1 || p.ManagedFields[0].Manager != "nodeecho/db" {
+		t.Errorf("managed fields = %+v, want NodeEcho's only", p.ManagedFields)
+	}
+	if labels, _ := ownedKeys(p, "nodeecho/db"); !labels["a"] {
+		t.Error("owned keys lost after stripping")
+	}
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node", Labels: map[string]string{"z": "a"}, Annotations: map[string]string{"x": "y"}},
+		Spec:       corev1.NodeSpec{Unschedulable: true, Taints: []corev1.Taint{{Key: "t"}}, PodCIDR: "10.0.0.0/24"},
+		Status:     corev1.NodeStatus{Images: []corev1.ContainerImage{{Names: []string{"big"}}}},
+	}
+	got, _ = stripNode(node)
+	n := got.(*corev1.Node)
+	if !n.Spec.Unschedulable || len(n.Spec.Taints) != 1 || n.Labels["z"] != "a" || n.Annotations["x"] != "y" {
+		t.Errorf("stripped node lost a field NodeEcho reads: %+v", n)
+	}
+	if n.Spec.PodCIDR != "" || len(n.Status.Images) != 0 {
+		t.Errorf("stripped node kept spec or status: %+v", n)
+	}
+
+	got, _ = stripNamespace(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "n", Labels: map[string]string{"e": "on"}},
+		Spec: corev1.NamespaceSpec{Finalizers: []corev1.FinalizerName{"kubernetes"}}})
+	if ns := got.(*corev1.Namespace); ns.Labels["e"] != "on" || len(ns.Spec.Finalizers) != 0 {
+		t.Errorf("stripped namespace = %+v", ns)
+	}
+
+	// Tombstones and other objects pass through.
+	tomb := toolscache.DeletedFinalStateUnknown{Key: "n/p"}
+	for _, f := range []toolscache.TransformFunc{stripPod, stripNode, stripNamespace} {
+		if out, _ := f(tomb); out != tomb {
+			t.Errorf("tombstone changed: %v", out)
+		}
 	}
 }

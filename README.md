@@ -42,11 +42,13 @@ make lint     # golangci-lint and the toolchain check
 make build    # bin/nodeecho
 make e2e      # end-to-end on throwaway k3d clusters: 1.34, 1.36, 1.36 with
               # PodTopologyLabelsAdmission off; needs docker, k3d, kubectl, jq
+make scale    # memory, API requests and latency with thousands of pods on
+              # fake Nodes, on a throwaway k3d cluster
 make deploy   # kustomize config/default into nodeecho-system
 ```
 
-`make e2e` uses its own kubeconfig per cluster and never touches the default
-one. Set `E2E_NETWORK` to attach the k3d nodes to an existing Docker network,
+`make e2e` and `make scale` use their own kubeconfig per cluster and never
+touch the default one. Set `E2E_NETWORK` to attach the k3d nodes to an existing Docker network,
 for instance one that reaches an HTTP proxy; see `hack/e2e.sh` for the other
 settings.
 

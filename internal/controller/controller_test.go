@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -86,7 +87,10 @@ func run(m *testing.M, cfg *rest.Config) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{Metrics: metricsserver.Options{BindAddress: "0"}})
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		Metrics: metricsserver.Options{BindAddress: "0"},
+		Cache:   cache.Options{ByObject: CacheOptions()},
+	})
 	if err != nil {
 		panic(err)
 	}

@@ -27,6 +27,10 @@ spec:
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef: {fieldPath: metadata.namespace}
+            # Keep below limits.memory, so that the garbage collector works
+            # harder before the container is killed.
+            - name: GOMEMLIMIT
+              value: 450MiB
           ports:
             - {name: metrics, containerPort: 8080}
             - {name: probes, containerPort: 8081}
@@ -34,9 +38,12 @@ spec:
             httpGet: {path: /healthz, port: probes}
           readinessProbe:
             httpGet: {path: /readyz, port: probes}
+          # Measured with hack/scale.sh: about 120 MiB at 20000 pods, 160 MiB
+          # while a rule change resyncs them all. Memory grows with every pod
+          # of the cluster, selected or not.
           resources:
-            requests: {cpu: 10m, memory: 64Mi}
-            limits: {memory: 256Mi}
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {memory: 512Mi}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

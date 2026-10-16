@@ -36,6 +36,10 @@ test: fmt vet ## Run unit and envtest tests.
 e2e: ## Run the end-to-end test on throwaway k3d clusters (see hack/e2e.sh).
 	./hack/e2e.sh
 
+.PHONY: scale
+scale: ## Measure memory, API requests and latency with many pods (see hack/scale.sh).
+	./hack/scale.sh
+
 .PHONY: envtest-assets
 envtest-assets: ## Print the envtest binaries path, downloading them if needed.
 	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path
@@ -73,7 +77,7 @@ undeploy: ## Remove the NodeEcho deployment.
 	kubectl delete -k config/default
 
 .PHONY: deploy-policy
-deploy-policy: ## Install the optional admission policy reserving nodeecho.fyannk.dev/ keys.
+deploy-policy: ## Install the optional admission policies (reserved keys, NodeEcho writer scope).
 	kubectl apply -k config/policy
 
 ##@ Help
