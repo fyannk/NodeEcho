@@ -20,7 +20,7 @@ Planned capabilities include:
 
 **Status: research and design. No controller is implemented yet.** Upstream
 CloudNativePG does not automatically consume NodeEcho metadata; an integration
-is required. The user's local fork has not been reviewed.
+is required. Compatibility with individual forks remains to be validated.
 
 Kubernetes 1.35 already provides zone and region labels on newly assigned pods
 through `PodTopologyLabelsAdmission`. NodeEcho focuses on dynamic node state,
