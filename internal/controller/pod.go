@@ -56,7 +56,7 @@ const (
 
 // PodReconciler writes each rule's projection on the pods it selects, with
 // one server-side apply field manager per rule, and removes what a rule no
-// longer writes. See docs/contract.md.
+// longer writes. See web/docs/reference/contract.md.
 type PodReconciler struct {
 	client.Client
 	Store    *Store
@@ -131,7 +131,7 @@ func inScope(rule *Rule, ns *corev1.Namespace, pod *corev1.Pod, node *corev1.Nod
 }
 
 // warnMissingTopology signals a pod lacking a zone or region label that
-// Kubernetes should have copied, see docs/contract.md.
+// Kubernetes should have copied, see web/docs/reference/contract.md.
 func (r *PodReconciler) warnMissingTopology(pod *corev1.Pod, node *corev1.Node, rule *Rule) {
 	l := rule.Labels
 	if l == nil {

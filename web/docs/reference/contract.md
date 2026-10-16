@@ -1,8 +1,13 @@
+---
+sidebar_position: 1
+title: Contract v1
+---
+
 # Contract v1
 
 Status: **draft**, 2026-10-16. No implementation exists yet. This page lists
 what a consumer can observe on its pods and what it may rely on; the
-[design notes](design.md) keep the reasoning.
+[design notes](../design/design.md) keep the reasoning.
 
 ## Principles
 

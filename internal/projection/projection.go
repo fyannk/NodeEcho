@@ -17,7 +17,7 @@ SPDX-License-Identifier: Apache-2.0
 */
 
 // Package projection computes the metadata a rule writes on a pod from the
-// pod's Node, as specified in docs/contract.md ("Keys"). It is pure: no API
+// pod's Node, as specified in web/docs/reference/contract.md ("Keys"). It is pure: no API
 // calls, no ownership decisions.
 package projection
 

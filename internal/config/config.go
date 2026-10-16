@@ -17,7 +17,7 @@ SPDX-License-Identifier: Apache-2.0
 */
 
 // Package config parses and validates the NodeEcho rules ConfigMap, as
-// specified in docs/contract.md ("Configuration").
+// specified in web/docs/reference/contract.md ("Configuration").
 package config
 
 import (

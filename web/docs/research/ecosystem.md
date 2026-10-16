@@ -1,3 +1,8 @@
+---
+sidebar_position: 3
+title: Ecosystem
+---
+
 # Ecosystem research
 
 Research checked: **2026-10-16**.

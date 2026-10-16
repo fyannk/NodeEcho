@@ -1,3 +1,8 @@
+---
+sidebar_position: 2
+title: Operators survey
+---
+
 # Node usage by Kubernetes operators
 
 Research checked: **2026-10-12**, from shallow clones of each default branch.

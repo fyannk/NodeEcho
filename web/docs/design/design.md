@@ -1,7 +1,12 @@
+---
+sidebar_position: 1
+title: Design notes
+---
+
 # Proposed design
 
 Status: **proposal**, 2026-10-16. Examples below are not an implemented API.
-The consumer-facing rules are in the [contract](contract.md); this page keeps
+The consumer-facing rules are in the [contract](../reference/contract.md); this page keeps
 the reasoning.
 
 ## Goal
@@ -137,7 +142,7 @@ startup.
   configure the key they already know, and the same pod spec works with or
   without NodeEcho. An optional `prefix` avoids clashes with a pod's own keys.
 - Labels or annotations per rule: ECK reads annotations, Strimzi, TiDB,
-  Percona MongoDB and CloudNativePG labels ([operators survey](operators.md)).
+  Percona MongoDB and CloudNativePG labels ([operators survey](../research/operators.md)).
 - Values follow later node changes, whereas KEP-4742 copies once at binding;
   this difference is documented.
 - On Kubernetes 1.35 and later (version read from `/version`, readable by
@@ -155,7 +160,7 @@ startup.
 - The `annotations` block copies node annotations, with the same `copy`,
   `target` and `prefix` semantics as `labels`. Consumers that need it:
   Redpanda's `rackAwareness.nodeAnnotation` can name a node annotation, and
-  Rook reads mon IPs from one ([operators survey](operators.md)).
+  Rook reads mon IPs from one ([operators survey](../research/operators.md)).
 - `target` defaults to `annotations`: any node annotation value is valid as a
   pod annotation value. A node annotation value can hold any characters, up
   to the 256 KiB shared by all of an object's annotations, whereas a label
@@ -188,7 +193,7 @@ structured data. Topology can be copied as labels under its original or a
 configured destination key, subject to collision rules.
 
 There is no schema-version or source-identity key on pods. The values are
-plain echoes in Kubernetes' own formats; the [contract](contract.md) is
+plain echoes in Kubernetes' own formats; the [contract](../reference/contract.md) is
 versioned, and a breaking change uses a new key name.
 
 ## Reconciliation
@@ -319,7 +324,7 @@ projector failure should be reported separately.
   annotations; until then those listeners keep needing Node rights.
 - Cluster facts that are not per pod: distribution, Node count, capacity
   (CockroachDB, MinIO, KubeBlocks, Flink). Most are optional or have an
-  override; see the [operators survey](operators.md).
+  override; see the [operators survey](../research/operators.md).
 
 ## Decisions
 

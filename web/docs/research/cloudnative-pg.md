@@ -1,3 +1,8 @@
+---
+sidebar_position: 1
+title: CloudNativePG
+---
+
 # CloudNativePG: removing direct Node access while retaining behavior
 
 Research checked: **2026-10-16**.
