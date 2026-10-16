@@ -50,6 +50,10 @@ rules:
     target: labels              # or annotations (ECK reads annotations)
     prefix: ""                  # optional: <prefix><key> for keys that could clash
     forceKubernetesManaged: false
+  annotations:                  # node annotations, same fields minus forceKubernetesManaged
+    copy: [rack.example.org/position]
+    target: annotations         # default; labels only for label-safe values
+    prefix: ""
 ```
 
 - Selection is on pods, since NodeEcho writes pods: `podSelector` is required;
@@ -60,9 +64,13 @@ rules:
 - An invalid rule (missing name or `podSelector`, duplicate name, bad selector
   or domain) is refused with a log line and a metric; valid rules keep running.
   A ConfigMap has no status, so logs and metrics are the feedback channel.
-- Two rules on the same pod: label copies agree (same node value); drain marks
-  under different domains are both written; the same domain in two rules is
-  an invalid configuration.
+- Node labels and node annotations are separate sources, each with its own
+  block, see [Copied annotations](#copied-annotations). Within one rule, two
+  copies resolving to the same pod key (a node label and a node annotation of
+  the same name, or a `prefix` making them collide) are an invalid rule.
+- Two rules on the same pod: copies of the same source agree (same node
+  value); drain marks under different domains are both written; the same
+  domain in two rules is an invalid configuration.
 
 `example.org` keys are placeholders, as below.
 
@@ -119,6 +127,24 @@ the published facts can ignore the mark.
   gets a Warning Event and a metric: it signals the flag, it does not copy
   silently. Keys that Kubernetes does not copy are always copied when
   configured.
+
+### Copied annotations
+
+- The `annotations` block copies node annotations, with the same `copy`,
+  `target` and `prefix` semantics as `labels`. Consumers that need it:
+  Redpanda's `rackAwareness.nodeAnnotation` can name a node annotation, and
+  Rook reads mon IPs from one ([operators survey](operators.md)).
+- `target` defaults to `annotations`: any node annotation value is valid as a
+  pod annotation value. A node annotation value can hold any characters, up
+  to the 256 KiB shared by all of an object's annotations, whereas a label
+  value is at most 63 characters of `[A-Za-z0-9._-]`, starting and ending
+  alphanumeric. With `target: labels`,
+  a value that is not a valid label value is not written; the pod gets a
+  Warning Event and a metric, and a previously copied value is removed rather
+  than left stale.
+- Kubernetes does not copy node annotations to pods, so there is no
+  `forceKubernetesManaged` here: configured keys are always copied.
+- Values follow later node changes, as for labels.
 
 ## Illustrative pod metadata
 
