@@ -9,26 +9,54 @@ Kubernetes-native facilities and the closest prior art in more depth.
 
 ## Summary
 
-| Operator | Reads Nodes? | What | For what | NodeEcho sufficient? |
-|---|---|---|---|---|
-| ECK (Elasticsearch) | yes; ClusterRole only when `config.exposedNodeLabels` is set (it is by default) | user-listed node labels | zone awareness, `downward-node-labels` | **partly**: the values must arrive as Pod **annotations**, not labels |
-| Strimzi (Kafka) | yes: operator `list`; broker and client Pods `get` through per-cluster ClusterRoleBindings | `topologyKey` label, `status.addresses` | rack awareness; NodePort advertised addresses | **partly**: rack yes (already solved by `type: environment-variable`); NodePort needs addresses |
-| Zalando postgres-operator | yes; always on (Node informer) | `spec.unschedulable`, `node_readiness_label`, label `master=true` | move primaries off draining nodes | **yes**, if the drain mark covers unschedulable and the readiness label is copied |
-| Crunchy PGO, Percona PG, Percona PS-MySQL, Percona PXC, StackGres | no | none | none | not needed |
-| Percona PSMDB (MongoDB) | yes, cluster-wide manifest only; best effort | zone and region labels | replica-set member tags | **yes** (KEP-4742 alone would cover it) |
-| KubeBlocks | yes, always in ClusterRole | Node count | experimental NodeCountScaler (off by default) | **no** (aggregate), but the feature is optional |
-| MongoDB Kubernetes (Community + Enterprise, unified) | telemetry only; optional ClusterRole | first Node's labels and annotations | cloud-provider detection | not needed (degrades to "unknown") |
-| MongoDB Community (legacy repo) | no | none | none | not needed |
-| cass-operator, k8ssandra-operator | no | none | none | not needed |
-| CockroachDB (cockroach-operator) | yes, mandatory | `status.nodeInfo.kubeletVersion`, annotations of one Node | telemetry label | **no**: needs a cluster fact, and deploy fails without it |
-| TiDB operator v2 | yes, always | PD `location-labels` keys (zone, region, host aliases) | TiKV/TiDB store labels | **yes**, with configurable keys |
-| Vitess, RabbitMQ, OT Redis, Spotahome Redis, Altinity ClickHouse, Solr | no | none | none | not needed |
-| MinIO operator | yes, always in ClusterRole | kubeletVersion, `eks.amazonaws.com*` labels | pick the CSR signer on EKS | **no**, but an env var already bypasses it |
-| Flink operator | optional (`rbac.nodesRule.create: false` by default) | allocatable, node metrics, nodegroup label | autoscaler capacity check | **no** (cluster capacity) |
-| Rook/Ceph | yes, essential | labels, taints, unschedulable, conditions, addresses, annotations | OSD placement, CRUSH topology, mon IPs, drain/PDB | **no**: manages the nodes themselves |
-| Redpanda | yes: operator, plus a ClusterRole for broker Pods | zone labels or a configurable key, addresses, unschedulable/taints/conditions | rack awareness, external addresses, PVC unbinder | **partly** |
-| Koperator (Kafka) | yes | user-listed labels, `status.addresses` | rack awareness, NodePort host | **partly** (addresses) |
-| Scylla operator | yes, essential | Nodes for tuning and orphaned PVs | node tuning daemons | **no** |
+One row per operator. Columns:
+
+- **Needs Nodes?**: whether the operator, or Pods it creates, reads the Node API.
+- **Optional?**: whether it can run without Node rights, and what is lost.
+- **Cordon/taints, Labels, Annotations**: which Node data it reads.
+- **Access**: *watch* = a Node change triggers a reconcile; *cached read* =
+  Nodes sit in the manager cache but a change triggers nothing; *read* = a
+  direct `get`/`list` when needed.
+- **Forbidden-Nodes issues/PRs**: upstream items about running without Node
+  rights, with their state on 2026-10-16. "None found" means the GitHub
+  searches `nodes forbidden`, `nodes clusterrole` and
+  `nodes namespace permissions` returned nothing relevant.
+
+| Operator | Needs Nodes? | Optional? | Cordon/taints | Labels | Annotations | Access | Forbidden-Nodes issues/PRs | NodeEcho sufficient? |
+|---|---|---|---|---|---|---|---|---|
+| CloudNativePG | yes, always | no upstream: startup fails without the rights | yes: `unschedulable` + `DRAIN_TAINTS` keys | yes: configured failure-domain keys | no | watch | [#9346](https://github.com/cloudnative-pg/cloudnative-pg/issues/9346) (closed not planned, 2026-09-30), [PR #9350](https://github.com/cloudnative-pg/cloudnative-pg/pull/9350) (closed, not merged), [PR #10135](https://github.com/cloudnative-pg/cloudnative-pg/pull/10135) `WATCH_NODES` (open) | **yes**, with an operator integration ([analysis](cloudnative-pg.md)) |
+| ECK (Elasticsearch) | yes, while `config.exposedNodeLabels` is set (default) | yes: an empty list drops the rule, but Pods using zone awareness or `downward-node-labels` then wait in init | no | yes: listed keys + `zoneAwareness.topologyKey` | no | read (`Get` per Pod) | [#8585](https://github.com/elastic/cloud-on-k8s/issues/8585) (open) | **yes**, with `target: annotations`, if ECK skips its own Node `Get` |
+| Strimzi (Kafka) | only for `type: topology-label` racks and NodePort listeners | yes: rack `type: environment-variable`; NodePort still needs addresses | no (Drain Cleaner works on evictions) | yes: `topologyKey` | no | read (init container at start; operator per reconcile) | [PR #12593](https://github.com/strimzi/strimzi-kafka-operator/pull/12593) env-var rack (merged 2026-04-14); [PR #3845](https://github.com/strimzi/strimzi-kafka-operator/pull/3845) `STRIMZI_RBAC_SCOPE` (merged 2021, Nodes stay cluster-wide); [#8583](https://github.com/strimzi/strimzi-kafka-operator/issues/8583), [#11669](https://github.com/strimzi/strimzi-kafka-operator/issues/11669) (closed, fixed by granting) | **partly**: rack yes if labelled at binding; NodePort needs addresses |
+| Zalando postgres-operator | yes, always | no: the Node informer always starts | yes: `unschedulable` only | yes: `node_readiness_label`, `master=true` | no | watch | [#2304](https://github.com/zalando/postgres-operator/issues/2304) "Run operator with RoleBinding" (open) | **yes**, if the drain mark covers `unschedulable` and the readiness label is copied |
+| Crunchy PGO | no | n/a | no | no | no | n/a | none current ([#180](https://github.com/CrunchyData/postgres-operator/issues/180) is a closed 2018 v3 issue) | not needed |
+| Percona PG | no | n/a | no | no | no | n/a | none found | not needed |
+| Percona PS-MySQL | no | n/a | no | no | no | n/a | none found | not needed |
+| Percona PXC | no | n/a | no | no | no | n/a | none found | not needed |
+| StackGres | no | n/a | no | no | no | n/a | not searched (issues on GitLab) | not needed |
+| Percona PSMDB (MongoDB) | only in the cluster-wide manifest | yes: errors ignored, member tags lost | no | yes: zone, region | no | read (uncached `Get`) | none found | **yes** (KEP-4742 alone would do) |
+| KubeBlocks | ClusterRole always; used only by NodeCountScaler | yes: NodeCountScaler is experimental, off by default | no | no | no | watch (NodeCountScaler only) | none found | **no** (Node count), feature optional |
+| MongoDB Kubernetes | telemetry only | yes: `operator.telemetry.enabled: false` or `installClusterRole: false`; provider becomes "unknown" | no | yes | yes | read (`list`, first Node) | [PR #252](https://github.com/mongodb/mongodb-kubernetes/pull/252) telemetry RBAC switch (merged 2025-07-14) | not needed |
+| MongoDB Community (legacy) | no | n/a | no | no | no | n/a | none found | not needed |
+| cass-operator | no | n/a | no | no | no | n/a | [#681](https://github.com/k8ssandra/cass-operator/issues/681) unused `nodes` rights removed (closed 2024-07-22) | not needed |
+| k8ssandra-operator | no | n/a | no | no | no | n/a | none found | not needed |
+| CockroachDB (cockroach-operator) | yes, always | no: deploy fails on error | no | no | yes: first Node (distribution) | read (`list`) | none found | **no**: cluster fact; needs an upstream fix |
+| TiDB operator v2 | yes, always | no: a read error fails the task | no | yes: PD `location-labels` | no | cached read | v1 only: [#4990](https://github.com/pingcap/tidb-operator/issues/4990) (closed), [#5034](https://github.com/pingcap/tidb-operator/issues/5034) (open), [PR #3896](https://github.com/pingcap/tidb-operator/pull/3896) namespace-scoped mode skipping forbidden operations (merged 2021) | **yes**, with configurable keys |
+| Vitess | no | n/a | no | no | no | n/a | none found | not needed |
+| RabbitMQ | no | n/a | no | no | no | n/a | none found | not needed |
+| OT Redis | no | n/a | no | no | no | n/a | none found | not needed |
+| Spotahome Redis | no | n/a | no | no | no | n/a | none found | not needed |
+| Altinity ClickHouse | no | n/a | no | no | no | n/a | none found | not needed |
+| Solr | no | n/a | no | no | no | n/a | none found | not needed |
+| MinIO operator | ClusterRole always; used only for EKS detection | yes: `MINIO_OPERATOR_CSR_SIGNER_NAME` skips it; a list error falls back | no | yes: `eks.amazonaws.com*` | no | read (`list`) | none found | **no**, but the env var already bypasses it |
+| Flink operator | only with `rbac.nodesRule.create` (default false) | yes: the autoscaler capacity check is lost | no | yes: `eks.amazonaws.com/nodegroup` | no | read (`list` + metrics) | none found | **no** (cluster capacity) |
+| Rook/Ceph | yes, essential | no | yes: `unschedulable`, taints, conditions | yes: CRUSH topology | yes: mon IP | watch (spec changes) | none found | **no**: manages the nodes themselves |
+| Redpanda | yes for rack awareness (off by default) and the PVC unbinder (off by default); operator holds `nodes get` | yes: both features are opt-in; the unbinder degrades on Forbidden | yes: PVC unbinder (`unschedulable`, taints, NotReady) | yes: rack key | yes: rack key can be an annotation | read (configurator at start; unbinder `list`) | [PR #1651](https://github.com/redpanda-data/redpanda-operator/pull/1651), [PR #1668](https://github.com/redpanda-data/redpanda-operator/pull/1668) (merged 2026-07): `nodes list/watch` only for multicluster installs | **partly** (addresses) |
+| Koperator (Kafka) | ClusterRole always; used with `rackAwareness` or NodePort listeners | yes: both features are opt-in | no | yes: `rackAwareness.labels` | no | read (`Get`) | none found | **partly** (addresses) |
+| Scylla operator | yes, essential | no: NodeConfig tuning and orphaned-PV cleanup | taints only (NodeConfig tolerations) | yes: NodeConfig `nodeSelector` | no | watch (informers) | [#1663](https://github.com/scylladb/scylla-operator/issues/1663) namespace-scoped operator (closed not planned, 2024-09-01) | **no** |
+
+Access, issue states and the CloudNativePG row were checked on 2026-10-16
+against the default branches; the other facts come from the commits pinned
+below.
 
 ## Per operator
 
@@ -135,4 +163,4 @@ Kubernetes-native facilities and the closest prior art in more depth.
 - Aerospike's init container (`aerospike-kubernetes-init`, separate repo) is believed to read Node addresses. Not read; the operator repo itself has no Node calls outside tests.
 - MariaDB operator: no Node calls found, but not inspected deeply.
 - Whether the API server lets a webhook on `pods/binding` mutate Binding labels in every case: proven only for annotations (Envoy). Labels are inferred from the 1.35 storage code.
-- No issue found asking Percona, Cockroach, MinIO, Redpanda or Flink to drop Node rights (searches returned nothing relevant).
+- Issue searches are keyword based (see the Summary); an item using other wording may be missing.
