@@ -14,6 +14,6 @@ The research uses primary project documentation, source code, and upstream
 issues/PRs. Links to moving documentation are accompanied by source snapshots
 where useful. A source being linked does not mean its project endorses NodeEcho.
 
-No implementation language, public API, license, or release commitment has been
-selected. YAML examples under the proposed design are illustrative and cannot
+The implementation will use Go and controller-runtime. No public API, license,
+or release commitment has been selected. YAML examples under the proposed design are illustrative and cannot
 be installed.

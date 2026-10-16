@@ -16,7 +16,7 @@ Planned capabilities include:
 - Continuously reflect node cordon state and selected taints onto bound pods.
 - Copy explicitly allowed node labels and annotations, including custom topology.
 - Limit propagation to selected namespaces and workloads.
-- Expose enough source information to distinguish missing or outdated context.
+- Write nothing when there is nothing to echo, and never overwrite another writer's keys.
 
 **Status: research and design. No controller is implemented yet.** Upstream
 CloudNativePG does not automatically consume NodeEcho metadata; an integration

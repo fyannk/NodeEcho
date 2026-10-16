@@ -30,11 +30,12 @@ infer an authoritative drain phase from the number of remaining pods.
 
 ## Rules
 
-Proposal (2026-10-12): one key of an administrator-owned ConfigMap holds a list
-of rule objects. There is no default consumer: without a rule, NodeEcho does
-nothing. A CRD only if adoption calls for it.
+One key of an administrator-owned ConfigMap holds a versioned list of rule
+objects. There is no default consumer: without a rule, NodeEcho does nothing.
+A CRD only if adoption calls for it.
 
 ```yaml
+version: 1                      # rule format version
 rules:
 - name: cnpg-instances          # required, unique: logs, metrics, field-manager suffix
   namespaceSelector: {}         # label selector on namespaces; empty = all
@@ -89,7 +90,6 @@ consumer's policy:
 | Unschedulable boolean | Decide whether cordon should trigger a switchover |
 | Selected taints | Apply the consumer's configured maintenance-taint policy |
 | Topology labels | Apply the consumer's failure-domain policy |
-| Source identity and freshness information | Decide whether context is usable |
 
 ### Unschedulable and taints
 
@@ -106,15 +106,28 @@ node:
   array has no label-safe form.
 
 Nothing is written for a schedulable, untainted node, so most pods carry
-neither key. The absence of both therefore also covers "not projected yet";
-telling the two apart is part of the freshness and unknown-state decision
-below.
+neither key. The absence of both also covers "not projected yet", see
+[Consistency and freshness](#consistency-and-freshness).
 
 There is no default taint list and no wildcard: only listed keys are echoed.
 The example above is CloudNativePG's default `DRAIN_TAINTS`; a consumer
 configured with another list needs the same list in its rule. Pods bound
 later get the keys when their node is known, and a full resync runs at
 startup.
+
+### Ownership and cleanup
+
+- NodeEcho writes with server-side apply, one field manager per rule
+  (`nodeecho/<rule name>`), and owns only the keys it wrote.
+- It never overwrites a key owned by another writer, including a value set in
+  the pod template: that key is skipped, with a Warning Event and a metric.
+- When a rule is removed, or a key leaves its configuration (a taint or label
+  removed from `copy`, a `key` or `prefix` changed), NodeEcho deletes the keys
+  that rule wrote.
+- A pod never changes node: `spec.nodeName` is immutable once bound. A pod
+  "moved" by an eviction or a rollout is a new Pod object, even under the same
+  name, and starts without the keys; NodeEcho echoes its new node after
+  binding. Nothing has to be removed on the consumer side.
 
 ### Copied labels and the Kubernetes version
 
@@ -165,8 +178,6 @@ metadata:
     nodeecho.fyannk.dev/unschedulable: "true"
   annotations:
     nodeecho.fyannk.dev/taints: '[{"key":"karpenter.sh/disrupted","effect":"NoSchedule"}]'
-    nodeecho.fyannk.dev/source-node-uid: "<node-uid>"
-    nodeecho.fyannk.dev/schema-version: "v1"
 ```
 
 The taint selection must include every key that the configured consumer needs.
@@ -174,8 +185,9 @@ A JSON annotation avoids label-value length and character constraints for
 structured data. Topology can be copied as labels under its original or a
 configured destination key, subject to collision rules.
 
-The example is deliberately incomplete: freshness and source-availability
-semantics must be designed before it becomes a compatibility contract.
+There is no schema-version or source-identity key on pods. The values are
+plain echoes in Kubernetes' own formats; the contract is versioned in this
+documentation, and a breaking change uses a new key name.
 
 ## Reconciliation
 
@@ -193,27 +205,22 @@ semantics must be designed before it becomes a compatibility contract.
 Use predicates to ignore irrelevant node updates, including unrelated status
 changes. Do not mirror every heartbeat onto every pod.
 
-Guard against replacement objects with the same name. Use appropriate UID or
-optimistic-concurrency preconditions when patching pods, and retain source Node
-UID so node deletion/recreation is distinguishable.
+Guard against replacement pods with the same name: use UID preconditions when
+patching. A deleted Node needs no handling: its pods are removed by the pod
+garbage collector.
 
 ## Consistency and freshness
 
 The proposed controller is eventually consistent. It cannot guarantee that a
 metadata patch happens before a workload starts or an eviction proceeds.
 
-Missing context is not equivalent to `unschedulable=false`. Consumers should
-distinguish uninitialized, available, unavailable, and stale context according
-to a documented policy.
-
-A last-change timestamp does not prove that a projector is still observing the
-source. If consumers require a freshness guarantee, design an explicit bounded
-refresh/health mechanism and account for its write amplification. A stopped
-controller cannot update pods to declare itself stopped.
-
-For source deletion, define whether topology is retained as historical placement
-while availability becomes unknown. Do not silently preserve a healthy-state
-claim after source loss.
+NodeEcho publishes no freshness or liveness signal. An absent key means
+"not set on the node" or "not projected (yet)", and a stopped NodeEcho leaves
+the last echoed values in place: it cannot update pods to declare itself
+stopped. This is documented, not solved; a consumer that needs certainty
+keeps its own fallback. A per-namespace heartbeat object is a possible later
+addition if a consumer requires it; a per-pod marker is excluded, as it would
+add a key to every selected pod.
 
 ## Permissions and trust
 
@@ -229,8 +236,13 @@ Expected runtime permissions:
 
 Ordinary Kubernetes RBAC does not restrict a pod `patch` grant to particular
 metadata keys or enforce arbitrary label-based object selection. Namespace
-RoleBindings can limit where NodeEcho writes; admission policy can additionally
-protect a reserved metadata prefix and reject unauthorized changes.
+RoleBindings can limit where NodeEcho writes.
+
+Anyone allowed to edit a pod can otherwise forge an echoed value, for example
+`unschedulable`, and trigger a consumer's switchover. NodeEcho ships an
+optional `ValidatingAdmissionPolicy` that reserves `nodeecho.fyannk.dev/*`
+for its ServiceAccount; administrators extend it to the custom keys their
+rules write.
 
 Only publish an explicit allowlist. Node metadata can reveal infrastructure
 information to tenants who could not previously read Nodes.
@@ -246,9 +258,11 @@ An application reading topology through an environment variable is different:
 the running process does not automatically receive later metadata changes.
 
 Prefer Kubernetes-native binding-time zone/region projection where available.
-For custom startup data, consider a binding-time webhook or explicit startup
-coordination only if a real consumer requires it. A normal pod-creation webhook
-cannot generally know the node that the scheduler will select later.
+NodeEcho patches after binding, so a value read through an environment variable
+at container start can be missing; this is a documented limitation. A
+binding-time webhook on `pods/binding` may come later, if a real consumer
+requires it. A normal pod-creation webhook cannot know the node that the
+scheduler will select later.
 
 ## Optional future eviction integration
 
@@ -304,14 +318,21 @@ projector failure should be reported separately.
   (CockroachDB, MinIO, KubeBlocks, Flink). Most are optional or have an
   override; see the [operators survey](operators.md).
 
-## Open decisions
+## Decisions
 
+Decided on 2026-10-16:
 
-- Implementation language and Kubernetes client framework.
-- Configuration format and whether a CRD is warranted.
-- Schema versioning of the metadata.
-- Freshness, unknown-state, and deleted-source behavior.
-- Default collision and managed-key cleanup policy.
-- Supported CNPG integration/version strategy.
-- Whether a namespaced per-node context object is preferable to pod patches
-  for consumers that do not need Downward API access.
+- Implementation in Go with controller-runtime.
+- Configuration: a ConfigMap with a `version` field; a CRD only if adoption
+  calls for it.
+- No freshness signal, no schema-version or source-identity key on pods; see
+  [Consistency and freshness](#consistency-and-freshness).
+- Ownership: server-side apply per rule, never overwrite another writer's
+  key, delete a rule's keys when it no longer configures them.
+- Prefix protection through an optional `ValidatingAdmissionPolicy`.
+
+Later, each only if a consumer or adoption requires it, likely with a CRD:
+
+- A per-namespace heartbeat object.
+- A namespaced per-node context object instead of pod patches.
+- A binding-time webhook for startup-sensitive consumers.
