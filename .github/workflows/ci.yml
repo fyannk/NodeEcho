@@ -11,8 +11,13 @@ permissions:
 
 jobs:
   test:
-    name: Build, vet, test
+    name: Build, vet, test (Kubernetes ${{ matrix.kubernetes }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Before and after Kubernetes copies zone and region onto pods.
+        kubernetes: ["1.34.1", "1.36.2"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -27,7 +32,7 @@ jobs:
       - run: go vet ./...
       # The controller tests run against a real API server (envtest).
       - name: Install envtest binaries
-        run: echo "KUBEBUILDER_ASSETS=$(make -s envtest-assets)" >> "$GITHUB_ENV"
+        run: echo "KUBEBUILDER_ASSETS=$(make -s envtest-assets ENVTEST_K8S_VERSION=${{ matrix.kubernetes }})" >> "$GITHUB_ENV"
       - run: go test ./... -race -count=1
 
   lint:
@@ -69,3 +74,17 @@ jobs:
           persist-credentials: false
       - run: kubectl kustomize config/default > /dev/null
       - run: kubectl kustomize config/policy > /dev/null
+      - run: kubectl kustomize config/prometheus > /dev/null
+      - run: kubectl kustomize config/grafana > /dev/null
+      - name: Dashboard is valid JSON
+        run: jq -e '.panels | length > 0' config/grafana/nodeecho.json > /dev/null
+
+  alerts:
+    name: Alert rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # promtool check and unit tests, in pinned containers.
+      - run: make test-alerts

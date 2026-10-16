@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
@@ -492,5 +493,22 @@ func TestConfigLoaderStates(t *testing.T) {
 	reconcile() // unchanged rules: no resync
 	if len(resync) != 0 {
 		t.Errorf("unchanged rules resynced %d pods", len(resync))
+	}
+}
+
+// A pod deleted while NodeEcho holds it is not an error, whatever form the
+// API server gives the failed UID precondition.
+func TestWriteToADeletedPodIsNotAnError(t *testing.T) {
+	setRules(t, cordonRule)
+	f := newFixture(t, map[string]string{"app": "x"}, nil)
+	ctx := context.Background()
+	snapshot := getPod(t, f.ns, "db")
+	must(k8s.Delete(ctx, snapshot, client.GracePeriodSeconds(0)))
+	eventually(t, "deleted", func() bool {
+		return apierrors.IsNotFound(k8s.Get(ctx, client.ObjectKeyFromObject(snapshot), &corev1.Pod{}))
+	})
+	r := &PodReconciler{Client: k8s, Recorder: events.NewFakeRecorder(10)}
+	if err := r.sync(ctx, snapshot, "test", "test/gone", projection.Result{Labels: map[string]string{uKey: "true"}}); err != nil {
+		t.Fatalf("writing to a deleted pod: %v", err)
 	}
 }

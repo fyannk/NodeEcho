@@ -29,6 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
@@ -313,5 +314,31 @@ func TestStripKeepsWhatNodeEchoReads(t *testing.T) {
 		if out, _ := f(tomb); out != tomb {
 			t.Errorf("tombstone changed: %v", out)
 		}
+	}
+}
+
+func TestPodGone(t *testing.T) {
+	pods := schema.GroupResource{Resource: "pods"}
+	for name, tc := range map[string]struct {
+		err  error
+		gone bool
+	}{
+		"not found":                  {apierrors.NewNotFound(pods, "p"), true},
+		"invalid uid":                {apierrors.NewInvalid(schema.GroupKind{Kind: "Pod"}, "p", nil), false},
+		"uid mismatch before 1.36":   {apierrors.NewConflict(pods, "p", errors.New("uid mismatch: the provided object specified uid 1, and no existing object was found")), true},
+		"field manager conflict":     {apierrors.NewApplyConflict([]metav1.StatusCause{{Field: ".metadata.labels.k"}}, "conflict"), false},
+		"conflict on something else": {apierrors.NewConflict(pods, "p", errors.New("the object has been modified")), false},
+		"forbidden":                  {apierrors.NewForbidden(pods, "p", errors.New("no")), false},
+		"wrapped not found":          {fmt.Errorf("applying: %w", apierrors.NewNotFound(pods, "p")), true},
+	} {
+		if got := podGone(tc.err); got != tc.gone {
+			t.Errorf("%s: podGone = %v, want %v", name, got, tc.gone)
+		}
+	}
+	invalidUID := apierrors.NewInvalid(schema.GroupKind{Kind: "Pod"}, "p", field.ErrorList{
+		field.Invalid(field.NewPath("metadata", "uid"), "x", "field is immutable"),
+	})
+	if !podGone(invalidUID) {
+		t.Error("an Invalid metadata.uid means the pod was replaced")
 	}
 }

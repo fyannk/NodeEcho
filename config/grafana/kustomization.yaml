@@ -1,0 +1,11 @@
+# Optional: the NodeEcho dashboard, as a ConfigMap labelled for Grafana's
+# dashboard sidecar (kube-prometheus-stack, grafana chart). It can also be
+# imported by hand from nodeecho.json.
+namespace: nodeecho-system
+configMapGenerator:
+  - name: nodeecho-dashboard
+    files: [nodeecho.json]
+    options:
+      disableNameSuffixHash: true
+      labels:
+        grafana_dashboard: "1"

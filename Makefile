@@ -32,6 +32,10 @@ ENVTEST = go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
 test: fmt vet ## Run unit and envtest tests.
 	KUBEBUILDER_ASSETS="$$($(MAKE) -s envtest-assets)" go test ./... -coverprofile cover.out
 
+.PHONY: test-alerts
+test-alerts: ## Check and unit-test the Prometheus alerts with promtool (needs docker).
+	./hack/test-alerts.sh
+
 .PHONY: e2e
 e2e: ## Run the end-to-end test on throwaway k3d clusters (see hack/e2e.sh).
 	./hack/e2e.sh

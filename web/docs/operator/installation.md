@@ -42,13 +42,17 @@ images:
 | --- | --- |
 | Namespace `nodeecho-system` | NodeEcho's namespace |
 | ServiceAccount `nodeecho` | its identity |
-| ClusterRole and binding | `list`, `watch` on Nodes and Namespaces; `list`, `watch`, `patch` on Pods; `create`, `patch` on Events |
+| ClusterRole and binding | `list`, `watch` on Nodes and Namespaces; `list`, `watch`, `patch` on Pods; `create`, `patch` on Events; `create` on TokenReviews and SubjectAccessReviews, for the metrics endpoint |
 | Role and binding | read ConfigMaps and manage the leader election Lease, in its own namespace only |
 | Deployment `nodeecho` | one replica, leader election on, non-root, read-only root file system |
+| Service `nodeecho-metrics` | the HTTPS metrics endpoint, port 8443 |
+| ClusterRole `nodeecho-metrics-reader` | `GET /metrics`, to bind to your scraper |
 | ConfigMap `nodeecho` | the rules, `rules: []` to start with |
 
 Then install the [admission policies](admission-policies.md) from
-`config/policy`, after adding your rules' keys to them.
+`config/policy`, after adding your rules' keys to them, and, with the
+Prometheus Operator, the [monitoring](observability.md) from
+`config/prometheus` and `config/grafana`.
 
 ## Namespace and names
 

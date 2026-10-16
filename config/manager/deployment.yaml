@@ -32,7 +32,7 @@ spec:
             - name: GOMEMLIMIT
               value: 450MiB
           ports:
-            - {name: metrics, containerPort: 8080}
+            - {name: https-metrics, containerPort: 8443}
             - {name: probes, containerPort: 8081}
           livenessProbe:
             httpGet: {path: /healthz, port: probes}

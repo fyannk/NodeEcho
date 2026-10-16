@@ -15,6 +15,14 @@ rules:
   - apiGroups: ["", events.k8s.io]
     resources: [events]
     verbs: [create, patch]
+  # The metrics endpoint asks the API server who a scraper is and whether it
+  # may GET /metrics; not needed with --metrics-secure=false.
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

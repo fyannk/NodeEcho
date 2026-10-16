@@ -71,7 +71,9 @@ wait_count() {
 }
 
 leader() { k get lease -n "$SYS" nodeecho.fyannk.dev -o jsonpath='{.spec.holderIdentity}' | cut -d_ -f1; }
-metrics() { k get --raw "/api/v1/namespaces/$SYS/pods/$(leader):8080/proxy/metrics"; }
+# Metrics are served over plain HTTP here (see the overlay), so that the API
+# server proxy can read them.
+metrics() { k get --raw "/api/v1/namespaces/$SYS/pods/$(leader):8443/proxy/metrics"; }
 
 # snapshot <label>: NodeEcho's memory and its API requests so far.
 snapshot() {
@@ -148,6 +150,11 @@ patches:
       - op: replace
         path: /spec/variables/0/expression
         value: "['nodeecho.fyannk.dev/', 'rack.example.org/']"
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --metrics-secure=false
 EOF
 k apply -k "$overlay" >/dev/null
 k rollout status -n "$SYS" deployment/nodeecho --timeout=180s >/dev/null

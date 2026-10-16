@@ -12,8 +12,29 @@ linters:
     - staticcheck
     - unused
     - gosec
+    # Logging: logr key-value pairs, and no output around the structured
+    # logger. The message style is enforced by internal/logstyle.
+    - loggercheck
+    - forbidigo
+  settings:
+    loggercheck:
+      logr: true
+      klog: false
+      kitlog: false
+      zap: false
+      require-string-key: true
+      no-printf-like: true
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^(fmt\.Print(f|ln)?|print|println)$
+          msg: log with the structured logger instead
+        - pattern: ^log\.(Print|Fatal|Panic)(f|ln)?$
+          pkg: ^log$
+          msg: log with the structured logger instead
   exclusions:
     rules:
       - path: _test\.go
         linters:
           - gosec
+          - forbidigo

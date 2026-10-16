@@ -12,6 +12,7 @@ make build    # bin/nodeecho
 make test     # unit, fuzz-seed and envtest tests
 make lint     # golangci-lint and the toolchain check
 make vuln     # govulncheck
+make test-alerts  # promtool check and unit tests of the alerts (docker)
 ```
 
 ## Layout
@@ -45,6 +46,32 @@ write the default one; they delete their clusters at the end unless
 `E2E_KEEP=1` or `SCALE_KEEP=1`. Behind an HTTP proxy, set `E2E_NETWORK` to a
 Docker network that reaches it; the proxy variables are passed to the image
 build and to the k3d nodes.
+
+## Logging
+
+Logs go through controller-runtime's logr logger, as JSON, following the
+[Kubernetes structured logging guidelines](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md):
+
+- the message is a constant string saying what happened, starting with a
+  capital letter, without a trailing period or format verbs:
+  `logger.Info("Rule refused", "rule", name)`, not
+  `logger.Info("rule " + name + " refused.")`;
+- everything variable goes in key-value pairs, with lowerCamelCase keys;
+- errors go through `logger.Error(err, "…")`;
+- level 0 for what an operator acts on, `V(1)` for per-pod detail.
+
+Three checks enforce it: `internal/logstyle` (a test that parses every log
+call: message literal, capital, punctuation, keys), and two linters in
+`make lint`: `loggercheck` (key-value pairs) and `forbidigo` (no
+`fmt.Print*` or standard `log` calls outside tests). The end-to-end test
+checks that every line NodeEcho prints is JSON.
+
+## Monitoring
+
+`make test-alerts` checks `config/prometheus/alerts.yaml` with promtool and
+runs its unit tests, `config/prometheus/alerts_test.yaml`, in pinned
+containers. Add a test with every new alert. The end-to-end test checks that
+every metric the alerts and the dashboard use is exposed.
 
 ## This site
 

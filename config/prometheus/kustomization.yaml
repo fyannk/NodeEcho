@@ -1,0 +1,8 @@
+# Optional, for the Prometheus Operator: scrape NodeEcho and alert on it.
+# Needs the monitoring.coreos.com CRDs. The binding assumes kube-prometheus
+# (ServiceAccount prometheus-k8s in monitoring); adapt it to your Prometheus.
+namespace: nodeecho-system
+resources:
+  - service_monitor.yaml
+  - alerts.yaml
+  - reader_binding.yaml

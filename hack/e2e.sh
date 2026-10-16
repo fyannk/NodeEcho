@@ -143,7 +143,30 @@ leader_not_ready() {
 	l=$(leader)
 	[[ -n $l ]] && [[ $(k get pod -n "$SYS" "$l" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == False ]]
 }
-metrics() { k get --raw "/api/v1/namespaces/$SYS/pods/$(leader):8080/proxy/metrics"; }
+# forward <port> <command...>: runs the command with $LOCAL set to a local
+# port forwarded to <port> of the leader.
+forward() {
+	local port=$1 out=$WORK/forward.out pid i
+	shift
+	: >"$out"
+	LOCAL=""
+	k port-forward -n "$SYS" "pod/$(leader)" ":$port" >"$out" 2>&1 &
+	pid=$!
+	for i in $(seq 50); do
+		LOCAL=$(sed -n 's/^Forwarding from 127.0.0.1:\([0-9]*\).*/\1/p' "$out" | head -1)
+		[[ -n $LOCAL ]] && break
+		sleep 0.1
+	done
+	"$@"
+	local code=$?
+	kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	return "$code"
+}
+# http_code <scheme> <path> [curl args...]: the status of a request to $LOCAL.
+http_code() { curl -sk -o /dev/null -w '%{http_code}' "$1://127.0.0.1:$LOCAL$2" "${@:3}"; }
+http_body() { curl -skf "$1://127.0.0.1:$LOCAL$2" "${@:3}"; }
+metrics() { forward 8443 http_body https /metrics -H "Authorization: Bearer $SCRAPER_TOKEN"; }
 metric_is() { metrics | grep -qx "$1 $2"; }
 
 policy_checked() { k get validatingadmissionpolicy "$1" -o json | jq -e '.status.typeChecking != null' >/dev/null; }
@@ -264,6 +287,11 @@ patches:
       - op: replace
         path: /spec/variables/0/expression
         value: "['nodeecho.fyannk.dev/', 'topology.kubernetes.io/zone', 'topology.kubernetes.io/region', 'rack.example.org/', 'e2e.example.org/']"
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --pprof-bind-address=127.0.0.1:6060
 EOF
 	k apply -k "$overlay" >/dev/null
 	local warnings
@@ -274,6 +302,14 @@ EOF
 	done
 	ok "policies compile without warnings"
 	TIMEOUT=120 wait_for "NodeEcho rolled out" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
+
+	# A scraper allowed to read the metrics, and one that is not.
+	k create serviceaccount -n "$SYS" metrics-scraper >/dev/null
+	k create serviceaccount -n "$SYS" nobody >/dev/null
+	k create clusterrolebinding nodeecho-e2e-scraper --clusterrole=nodeecho-metrics-reader \
+		--serviceaccount="$SYS:metrics-scraper" >/dev/null
+	SCRAPER_TOKEN=$(k create token -n "$SYS" metrics-scraper --duration=2h)
+	NOBODY_TOKEN=$(k create token -n "$SYS" nobody --duration=2h)
 }
 
 workload() {
@@ -517,6 +553,44 @@ scenario_metrics() {
 	ok "pod writes counted"
 	metrics | grep -q '^nodeecho_keys_skipped_total{reason="owned-by-other",rule="db"}' || fail "no skipped key counted"
 	ok "skipped keys counted"
+	metrics | grep -q '^nodeecho_build_info{go_version="go[0-9.]*",version="e2e"} 1$' || fail "no build info"
+	ok "build info published"
+	metrics | grep -q '^nodeecho_config_loads_total{result="valid"}' || fail "no configuration load counted"
+	ok "configuration loads counted"
+
+	[[ $(forward 8443 http_code https /metrics) == 401 ]] || fail "metrics served without a token"
+	ok "metrics refused without a token (401)"
+	[[ $(forward 8443 http_code https /metrics -H "Authorization: Bearer $NOBODY_TOKEN") == 403 ]] ||
+		fail "metrics served to an identity without the reader role"
+	ok "metrics refused to an identity without the reader role (403)"
+	# Plain HTTP to the HTTPS port: net/http logs a TLS handshake error
+	# through the standard library's log package.
+	forward 8443 http_code http /metrics >/dev/null || true
+	wait_for "standard library log lines are structured too" stdlib_line_logged
+
+	# Every metric the alerts and the dashboard query must exist.
+	local exposed missing=()
+	exposed=$(metrics | grep -v '^#' | sed 's/[{ ].*//' | sort -u)
+	while read -r m; do
+		[[ $m == up ]] && continue
+		grep -qx "$m" <<<"$exposed" || missing+=("$m")
+	done < <(grep -ohE '[a-z][a-z0-9_]*\{job=' "$ROOT/config/prometheus/alerts.yaml" "$ROOT/config/grafana/nodeecho.json" |
+		sed 's/{job=//' | sort -u)
+	((${#missing[@]} == 0)) || fail "metrics used by the alerts or the dashboard but not exposed: ${missing[*]}"
+	ok "every metric of the alerts and the dashboard is exposed"
+}
+
+stdlib_line_logged() {
+	k logs -n "$SYS" "$(leader)" | jq -R -e -s 'split("\n") | map(select(. != "") | fromjson?) |
+		any(.[]; .logger == "stdlib" and (.line | contains("TLS handshake error")))' >/dev/null
+}
+
+scenario_pprof() {
+	echo "- pprof"
+	forward 6060 http_body http /debug/pprof/ | grep -q heap || fail "no pprof index"
+	ok "pprof index served on the pod's loopback"
+	[[ $(forward 6060 http_code http "/debug/pprof/heap?debug=1") == 200 ]] || fail "no heap profile"
+	ok "heap profile served"
 }
 
 scenario_bad_config() {
@@ -559,7 +633,7 @@ scenario_missing_config() {
 	TIMEOUT=60 wait_for "the leader reports not ready" leader_not_ready
 	k uncordon "$n" >/dev/null
 	hold 8 "nothing written or removed before a configuration" rv_unchanged
-	k logs -n "$SYS" "$(leader)" | grep -q 'rules ConfigMap not found' || fail "no log line for the missing ConfigMap"
+	k logs -n "$SYS" "$(leader)" | grep -q 'Rules ConfigMap not found' || fail "no log line for the missing ConfigMap"
 	ok "the missing ConfigMap is logged"
 
 	db_rules "$FORCE" | set_rules
@@ -622,6 +696,18 @@ scenario_health() {
 	[[ $(k get pods -n "$SYS" -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{end}') =~ ^0+$ ]] ||
 		fail "NodeEcho restarted"
 	ok "no container restart"
+
+	# Every line is a JSON object with an ISO 8601 time, a level and a
+	# message, klog's included.
+	local bad
+	bad=$(jq -R -r 'try (fromjson | if (has("level") and has("msg") and (.ts | type == "string") and
+		(.ts | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+"))) then empty else "missing fields: \(.)" end)
+		catch "not JSON: \(.)"' <<<"$logs" | head -3)
+	[[ -z $bad ]] || fail "log lines out of format: $bad"
+	ok "every log line is structured JSON ($(wc -l <<<"$logs") lines)"
+	jq -e -s 'any(.[]; .msg == "Starting manager" and .version == "e2e" and (.goVersion | startswith("go")))' \
+		<<<"$logs" >/dev/null || fail "no startup line with the version"
+	ok "the startup line carries the version"
 }
 
 run_variant() {
@@ -650,6 +736,7 @@ run_variant() {
 	scenario_heavy_pod
 	scenario_foreign
 	scenario_metrics
+	scenario_pprof
 	scenario_restart
 	scenario_failover
 	scenario_bad_config

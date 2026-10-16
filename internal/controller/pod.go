@@ -161,11 +161,11 @@ const removedRule = "(removed)"
 // another writer owns, and writes nothing when the pod already matches.
 func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager string, desired projection.Result) error {
 	for _, s := range desired.Skipped {
-		r.skip(pod, rule, s.Key, "invalid-value", s.Reason)
+		r.skip(ctx, pod, rule, s.Key, "invalid-value", s.Reason)
 	}
 	ownedLabels, ownedAnnotations := ownedKeys(pod, manager)
-	wantLabels := r.withoutForeign(pod, rule, desired.Labels, pod.Labels, ownedLabels)
-	wantAnnotations := r.withoutForeign(pod, rule, desired.Annotations, pod.Annotations, ownedAnnotations)
+	wantLabels := r.withoutForeign(ctx, pod, rule, desired.Labels, pod.Labels, ownedLabels)
+	wantAnnotations := r.withoutForeign(ctx, pod, rule, desired.Annotations, pod.Annotations, ownedAnnotations)
 
 	retry := false
 	for attempt := 0; ; attempt++ {
@@ -184,9 +184,9 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 		switch {
 		case err == nil:
 			podWrites.WithLabelValues(rule, "ok").Inc()
-			log.FromContext(ctx).V(1).Info("pod updated", "rule", rule, "labels", wantLabels, "annotations", wantAnnotations)
+			log.FromContext(ctx).V(1).Info("Pod updated", "rule", rule, "labels", wantLabels, "annotations", wantAnnotations)
 			return nil
-		case apierrors.IsNotFound(err), apierrors.IsInvalid(err) && strings.Contains(err.Error(), "metadata.uid"):
+		case podGone(err):
 			podWrites.WithLabelValues(rule, "gone").Inc()
 			return nil // the pod was deleted or replaced; the new one has its own event
 		case apierrors.IsInvalid(err), apierrors.IsForbidden(err):
@@ -195,6 +195,7 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 			// help until something changes, which brings a new event.
 			podWrites.WithLabelValues(rule, "rejected").Inc()
 			keysSkipped.WithLabelValues(rule, "rejected").Inc()
+			log.FromContext(ctx).Info("Write rejected by the API server", "rule", rule, "error", err.Error())
 			r.Recorder.Eventf(pod, nil, corev1.EventTypeWarning, ReasonKeySkipped, "Echo", "rule %s: write rejected: %v", rule, err)
 			return nil
 		case apierrors.IsConflict(err) && attempt < 3:
@@ -206,11 +207,11 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 			for _, k := range keys {
 				if _, ok := wantLabels[k.key]; ok && k.labels {
 					delete(wantLabels, k.key)
-					r.skip(pod, rule, k.key, "owned-by-other", "label owned by another writer")
+					r.skip(ctx, pod, rule, k.key, "owned-by-other", "label owned by another writer")
 				}
 				if _, ok := wantAnnotations[k.key]; ok && !k.labels {
 					delete(wantAnnotations, k.key)
-					r.skip(pod, rule, k.key, "owned-by-other", "annotation owned by another writer")
+					r.skip(ctx, pod, rule, k.key, "owned-by-other", "annotation owned by another writer")
 				}
 			}
 			retry = true
@@ -224,11 +225,11 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 // withoutForeign drops the keys that exist on the pod with another value and
 // that this manager does not own: another writer set them, and NodeEcho never
 // overwrites another writer's key.
-func (r *PodReconciler) withoutForeign(pod *corev1.Pod, rule string, want, current map[string]string, owned map[string]bool) map[string]string {
+func (r *PodReconciler) withoutForeign(ctx context.Context, pod *corev1.Pod, rule string, want, current map[string]string, owned map[string]bool) map[string]string {
 	out := make(map[string]string, len(want))
 	for k, v := range want {
 		if cur, exists := current[k]; exists && cur != v && !owned[k] {
-			r.skip(pod, rule, k, "owned-by-other", "key set by another writer")
+			r.skip(ctx, pod, rule, k, "owned-by-other", "key set by another writer")
 			continue
 		}
 		out[k] = v
@@ -236,8 +237,9 @@ func (r *PodReconciler) withoutForeign(pod *corev1.Pod, rule string, want, curre
 	return out
 }
 
-func (r *PodReconciler) skip(pod *corev1.Pod, rule, key, reason, detail string) {
+func (r *PodReconciler) skip(ctx context.Context, pod *corev1.Pod, rule, key, reason, detail string) {
 	keysSkipped.WithLabelValues(rule, reason).Inc()
+	log.FromContext(ctx).V(1).Info("Key skipped", "rule", rule, "key", key, "reason", reason, "detail", detail)
 	r.Recorder.Eventf(pod, nil, corev1.EventTypeWarning, ReasonKeySkipped, "Echo", "rule %s: key %s not written: %s", rule, key, detail)
 }
 
@@ -287,6 +289,22 @@ func ownedKeys(pod *corev1.Pod, manager string) (labelKeys, annotationKeys map[s
 		}
 	}
 	return labelKeys, annotationKeys
+}
+
+// podGone reports whether an apply failed because the pod was deleted or
+// replaced since it was read: the UID precondition failed. Kubernetes words
+// it as NotFound, as Invalid on metadata.uid, or, before 1.36, as a Conflict
+// "uid mismatch ... no existing object was found".
+func podGone(err error) bool {
+	switch {
+	case apierrors.IsNotFound(err):
+		return true
+	case apierrors.IsInvalid(err):
+		return strings.Contains(err.Error(), "metadata.uid")
+	case apierrors.IsConflict(err):
+		return len(conflictingKeys(err)) == 0 && strings.Contains(err.Error(), "uid mismatch")
+	}
+	return false
 }
 
 type metadataKey struct {
@@ -342,7 +360,7 @@ func (r *PodReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) 
 func (r *PodReconciler) requests(ctx context.Context, opts ...client.ListOption) []ctrl.Request {
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods, opts...); err != nil {
-		log.FromContext(ctx).Error(err, "listing pods to enqueue")
+		log.FromContext(ctx).Error(err, "Unable to list the pods to enqueue")
 		return nil
 	}
 	reqs := make([]ctrl.Request, 0, len(pods.Items))

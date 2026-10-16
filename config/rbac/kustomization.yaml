@@ -2,3 +2,4 @@ resources:
   - service_account.yaml
   - cluster_role.yaml
   - role.yaml
+  - metrics_reader_role.yaml

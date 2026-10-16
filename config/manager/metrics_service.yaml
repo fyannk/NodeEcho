@@ -1,0 +1,15 @@
+# HTTPS metrics, for a ServiceMonitor or any scraper; see config/prometheus.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nodeecho-metrics
+  labels:
+    app.kubernetes.io/name: nodeecho
+    app.kubernetes.io/component: metrics
+spec:
+  selector:
+    app.kubernetes.io/name: nodeecho
+  ports:
+    - name: https-metrics
+      port: 8443
+      targetPort: https-metrics

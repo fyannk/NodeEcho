@@ -1,0 +1,180 @@
+# promtool unit tests of alerts.yaml, run by hack/test-alerts.sh.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A healthy pair: a leader and a standby, both scraped.
+  - interval: 1m
+    input_series:
+      - series: up{job="nodeecho-metrics", pod="a"}
+        values: 1x30
+      - series: up{job="nodeecho-metrics", pod="b"}
+        values: 1x30
+      - series: leader_election_master_status{job="nodeecho-metrics", name="nodeecho.fyannk.dev", pod="a"}
+        values: 1x30
+      - series: leader_election_master_status{job="nodeecho-metrics", name="nodeecho.fyannk.dev", pod="b"}
+        values: 0x30
+      # The standby reports zeros; max() must not see them.
+      - series: nodeecho_config_valid{job="nodeecho-metrics", pod="a"}
+        values: 1x30
+      - series: nodeecho_config_valid{job="nodeecho-metrics", pod="b"}
+        values: 0x30
+      - series: nodeecho_rules_refused{job="nodeecho-metrics", pod="a"}
+        values: 0x30
+      - series: controller_runtime_reconcile_errors_total{job="nodeecho-metrics", controller="pods", pod="a"}
+        values: 0x30
+      - series: nodeecho_pod_writes_total{job="nodeecho-metrics", rule="db", result="ok", pod="a"}
+        values: 0+5x30
+    alert_rule_test:
+      - {eval_time: 30m, alertname: NodeEchoDown, exp_alerts: []}
+      - {eval_time: 30m, alertname: NodeEchoNoLeader, exp_alerts: []}
+      - {eval_time: 30m, alertname: NodeEchoConfigInvalid, exp_alerts: []}
+      - {eval_time: 30m, alertname: NodeEchoRulesRefused, exp_alerts: []}
+      - {eval_time: 30m, alertname: NodeEchoReconcileErrors, exp_alerts: []}
+      - {eval_time: 30m, alertname: NodeEchoWritesRejected, exp_alerts: []}
+
+  - name: down, then no leader
+    interval: 1m
+    input_series:
+      - series: up{job="nodeecho-metrics", pod="a"}
+        values: 0x20
+      - series: up{job="nodeecho-metrics", pod="b"}
+        values: 1x20
+      - series: leader_election_master_status{job="nodeecho-metrics", name="nodeecho.fyannk.dev", pod="b"}
+        values: 0x20
+    alert_rule_test:
+      # One instance up is enough.
+      - {eval_time: 20m, alertname: NodeEchoDown, exp_alerts: []}
+      - eval_time: 20m
+        alertname: NodeEchoNoLeader
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: No NodeEcho instance holds the lease.
+              description: >-
+                NodeEcho runs but no instance has been elected for 5 minutes, so
+                nothing is echoed. Check the Lease nodeecho.fyannk.dev and the logs.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechonoleader
+
+  - name: nothing scraped
+    interval: 1m
+    input_series:
+      - series: up{job="nodeecho-metrics", pod="a"}
+        values: 0x15
+    alert_rule_test:
+      - {eval_time: 5m, alertname: NodeEchoDown, exp_alerts: []}
+      - eval_time: 15m
+        alertname: NodeEchoDown
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: NodeEcho is down or not scraped.
+              description: >-
+                No NodeEcho instance has been scraped for 10 minutes. Pods keep
+                their last values: a new cordon or taint is not echoed.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechodown
+
+  - name: configuration
+    interval: 1m
+    input_series:
+      - series: nodeecho_config_valid{job="nodeecho-metrics", pod="a"}
+        values: 1x5 0x20
+      - series: nodeecho_rules_refused{job="nodeecho-metrics", pod="a"}
+        values: 0x5 2x20
+    alert_rule_test:
+      - {eval_time: 10m, alertname: NodeEchoConfigInvalid, exp_alerts: []}
+      - eval_time: 20m
+        alertname: NodeEchoConfigInvalid
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: The NodeEcho rules ConfigMap is invalid or missing.
+              description: >-
+                NodeEcho keeps applying the last valid configuration, or writes
+                nothing if it never loaded one. Rule changes do not apply.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoconfiginvalid
+      - eval_time: 20m
+        alertname: NodeEchoRulesRefused
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: 2 NodeEcho rules are refused.
+              description: >-
+                Refused rules are not applied; one that was running keeps its last
+                valid version. The log line "Rule refused" says why.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechorulesrefused
+
+  - name: errors, rejections and skips
+    interval: 1m
+    input_series:
+      - series: controller_runtime_reconcile_errors_total{job="nodeecho-metrics", controller="pods", pod="a"}
+        values: 0+2x40
+      - series: nodeecho_pod_writes_total{job="nodeecho-metrics", rule="db", result="rejected", pod="a"}
+        values: 0x10 1+1x10
+      - series: nodeecho_keys_skipped_total{job="nodeecho-metrics", rule="db", reason="owned-by-other", pod="a"}
+        values: 0x10 3+0x10
+      - series: nodeecho_keys_skipped_total{job="nodeecho-metrics", rule="db", reason="rejected", pod="a"}
+        values: 0x10 5+5x10
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: NodeEchoReconcileErrors
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: NodeEcho reconciles keep failing.
+              description: >-
+                Reconciles have been failing for 15 minutes; the failed pods are
+                retried with backoff. The log line "Reconciler error" says why.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoreconcileerrors
+      - eval_time: 20m
+        alertname: NodeEchoWritesRejected
+        exp_alerts:
+          - exp_labels: {severity: warning, rule: db}
+            exp_annotations:
+              summary: The API server rejects writes of NodeEcho rule db.
+              description: >-
+                Usually a key missing from the nodeecho-writer-scope policy's
+                allowed list, or annotations over the size limit. The pods'
+                KeySkipped Events give the API server's message.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechowritesrejected
+      # Rejections have their own alert: only owned-by-other is reported here.
+      - eval_time: 20m
+        alertname: NodeEchoKeysSkipped
+        exp_alerts:
+          - exp_labels: {severity: info, rule: db, reason: owned-by-other}
+            exp_annotations:
+              summary: NodeEcho rule db skips keys (owned-by-other).
+              description: >-
+                owned-by-other: another writer, often the pod template, holds the
+                key with another value. invalid-value: a Node value is not a valid
+                label value. The pods' KeySkipped Events name the keys.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/troubleshooting/#events
+
+  - name: slow echo
+    interval: 1m
+    input_series:
+      # Every pod waits between 60 and 120 s.
+      - series: workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="pods", le="10"}
+        values: 0x30
+      - series: workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="pods", le="60"}
+        values: 0x30
+      - series: workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="pods", le="120"}
+        values: 0+10x30
+      - series: workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="pods", le="+Inf"}
+        values: 0+10x30
+      # Another controller's queue is not looked at.
+      - series: workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="rules", le="+Inf"}
+        values: 0+10x30
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: NodeEchoEchoSlow
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Pods wait more than a minute for NodeEcho.
+              description: >-
+                The 99th percentile of the time a pod waits in NodeEcho's queue has
+                been above 60 s for 15 minutes: Node changes reach pods late.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoechoslow

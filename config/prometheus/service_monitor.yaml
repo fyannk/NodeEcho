@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nodeecho
+  labels:
+    app.kubernetes.io/name: nodeecho
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nodeecho
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: https-metrics
+      scheme: https
+      path: /metrics
+      # Prometheus authenticates with its ServiceAccount token, which needs
+      # the nodeecho-metrics-reader ClusterRole.
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        # NodeEcho serves a self-signed certificate unless --metrics-cert-dir
+        # points at one, for instance from cert-manager.
+        insecureSkipVerify: true

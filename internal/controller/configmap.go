@@ -60,7 +60,8 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 	if err := r.Get(ctx, r.ConfigMap, cm); err != nil {
 		if apierrors.IsNotFound(err) {
 			configValid.Set(0)
-			logger.Info("rules ConfigMap not found, keeping the last valid configuration", "configMap", r.ConfigMap)
+			configLoads.WithLabelValues("missing").Inc()
+			logger.Info("Rules ConfigMap not found, keeping the last valid configuration", "configMap", r.ConfigMap)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -68,20 +69,25 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 	data, ok := cm.Data[ConfigKey]
 	if !ok {
 		configValid.Set(0)
-		logger.Info("rules ConfigMap has no "+ConfigKey+" key, keeping the last valid configuration", "configMap", r.ConfigMap)
+		configLoads.WithLabelValues("missing").Inc()
+		logger.Info("Rules ConfigMap has no rules key, keeping the last valid configuration",
+			"configMap", r.ConfigMap, "key", ConfigKey)
 		return ctrl.Result{}, nil
 	}
 
 	valid, refused, err := config.Parse([]byte(data))
 	if err != nil {
 		configValid.Set(0)
-		logger.Error(err, "invalid configuration, keeping the last valid one", "configMap", r.ConfigMap)
+		configLoads.WithLabelValues("invalid").Inc()
+		logger.Error(err, "Invalid configuration, keeping the last valid one", "configMap", r.ConfigMap)
 		return ctrl.Result{}, nil
 	}
 	configValid.Set(1)
+	configLoads.WithLabelValues("valid").Inc()
+	configLastValid.SetToCurrentTime()
 	rulesRefused.Set(float64(len(refused)))
 	for _, e := range refused {
-		logger.Error(e.Err, "rule refused", "index", e.Index, "rule", e.Name)
+		logger.Error(e.Err, "Rule refused", "index", e.Index, "rule", e.Name)
 	}
 
 	changed, kept, err := r.Store.Set(valid, refused)
@@ -89,18 +95,17 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 		return ctrl.Result{}, fmt.Errorf("activating rules: %w", err)
 	}
 	for _, name := range kept {
-		logger.Info("refused rule keeps its last valid version", "rule", name)
+		logger.Info("Refused rule keeps its last valid version", "rule", name)
 	}
 	rulesActive.Set(float64(len(r.Store.Rules())))
 	if !changed {
 		return ctrl.Result{}, nil
 	}
-	logger.Info("rules loaded", "active", len(r.Store.Rules()), "refused", len(refused))
-
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods); err != nil {
 		return ctrl.Result{}, err
 	}
+	logger.Info("Rules loaded", "active", len(r.Store.Rules()), "refused", len(refused), "podsToResync", len(pods.Items))
 	for i := range pods.Items {
 		select {
 		case r.Resync <- event.GenericEvent{Object: &pods.Items[i]}:

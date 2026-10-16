@@ -1,5 +1,6 @@
 # Binaries and build outputs
 /bin/
+/nodeecho
 /dist/
 
 # Test coverage

@@ -7,11 +7,15 @@ title: Metrics and Events
 
 ## Metrics
 
-Served on `:8080/metrics` (Prometheus text format), next to the standard
-controller-runtime and Go runtime metrics.
+Served on `:8443/metrics` over HTTPS, to clients allowed to `GET /metrics`
+(see [Observability](../operator/observability.md#metrics)), next to the
+standard controller-runtime, client-go and Go runtime metrics.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
+| `nodeecho_build_info` | gauge | `version`, `go_version` | always `1` |
+| `nodeecho_config_loads_total` | counter | `result` | reads of the rules ConfigMap: `valid`, `invalid` or `missing` |
+| `nodeecho_config_last_valid_timestamp_seconds` | gauge | | time of the last valid read |
 | `nodeecho_config_valid` | gauge | | `1` when the last read configuration was valid, `0` when NodeEcho keeps an earlier one |
 | `nodeecho_rules_active` | gauge | | rules applied, including refused rules kept at their last valid version |
 | `nodeecho_rules_refused` | gauge | | rules refused in the last read configuration |
@@ -34,6 +38,12 @@ controller-runtime and Go runtime metrics.
 
 The `rule` label is `(removed)` for the cleanup of a rule that no longer
 exists.
+
+Useful standard metrics: `controller_runtime_reconcile_errors_total` and
+`controller_runtime_reconcile_time_seconds` (label `controller`: `pods`,
+`rules`), `workqueue_queue_duration_seconds` and `workqueue_depth` (label
+`name`), `leader_election_master_status`, `rest_client_requests_total`,
+`process_resident_memory_bytes`.
 
 ## Events
 

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -58,9 +59,11 @@ const (
 )
 
 var (
-	k8s   client.Client
-	store *Store
-	seq   atomic.Int32
+	// copiesTopology is true on Kubernetes 1.35 and later, as in main.
+	copiesTopology bool
+	k8s            client.Client
+	store          *Store
+	seq            atomic.Int32
 )
 
 func TestMain(m *testing.M) {
@@ -94,6 +97,9 @@ func run(m *testing.M, cfg *rest.Config) int {
 	if err != nil {
 		panic(err)
 	}
+	if copiesTopology, err = KubernetesCopiesTopology(cfg); err != nil {
+		panic(err)
+	}
 	store = &Store{}
 	resync := make(chan event.GenericEvent)
 	if err := (&ConfigReconciler{
@@ -104,7 +110,7 @@ func run(m *testing.M, cfg *rest.Config) int {
 	}
 	if err := (&PodReconciler{
 		Client: mgr.GetClient(), Store: store, Recorder: mgr.GetEventRecorder("nodeecho"),
-		Options: projection.Options{KubernetesCopiesTopology: true}, Resync: resync,
+		Options: projection.Options{KubernetesCopiesTopology: copiesTopology}, Resync: resync,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		panic(err)
 	}
@@ -353,6 +359,14 @@ func TestKubernetesManagedZone(t *testing.T) {
 `
 	setRules(t, fmt.Sprintf(zones, ""))
 	f := newFixture(t, map[string]string{"app": "db"}, map[string]string{zone: "a"})
+	if !copiesTopology {
+		// Before 1.35, NodeEcho copies the zone itself.
+		eventually(t, "zone copied by NodeEcho", func() bool {
+			p := getPod(t, f.ns, "db")
+			return hasLabel(p, zone, "a") && slices.Equal(managers(p), []string{"nodeecho/zones"})
+		})
+		return
+	}
 	consistently(t, "zone left to Kubernetes", func() bool {
 		p := getPod(t, f.ns, "db")
 		return hasLabel(p, zone, "a") && len(managers(p)) == 0

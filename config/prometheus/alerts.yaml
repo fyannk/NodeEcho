@@ -1,0 +1,102 @@
+# Alerts on NodeEcho. Tested by hack/test-alerts.sh (alerts_test.yaml).
+# Gauges are aggregated with max(): a standby instance runs no controller and
+# reports zeros.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nodeecho
+  labels:
+    app.kubernetes.io/name: nodeecho
+spec:
+  groups:
+    - name: nodeecho
+      rules:
+        - alert: NodeEchoDown
+          expr: absent(up{job="nodeecho-metrics"} == 1)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: NodeEcho is down or not scraped.
+            description: >-
+              No NodeEcho instance has been scraped for 10 minutes. Pods keep
+              their last values: a new cordon or taint is not echoed.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechodown
+        - alert: NodeEchoNoLeader
+          expr: max(leader_election_master_status{job="nodeecho-metrics", name="nodeecho.fyannk.dev"}) < 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: No NodeEcho instance holds the lease.
+            description: >-
+              NodeEcho runs but no instance has been elected for 5 minutes, so
+              nothing is echoed. Check the Lease nodeecho.fyannk.dev and the logs.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechonoleader
+        - alert: NodeEchoConfigInvalid
+          expr: max(nodeecho_config_valid{job="nodeecho-metrics"}) == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: The NodeEcho rules ConfigMap is invalid or missing.
+            description: >-
+              NodeEcho keeps applying the last valid configuration, or writes
+              nothing if it never loaded one. Rule changes do not apply.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoconfiginvalid
+        - alert: NodeEchoRulesRefused
+          expr: max(nodeecho_rules_refused{job="nodeecho-metrics"}) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: '{{ $value }} NodeEcho rules are refused.'
+            description: >-
+              Refused rules are not applied; one that was running keeps its last
+              valid version. The log line "Rule refused" says why.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechorulesrefused
+        - alert: NodeEchoReconcileErrors
+          expr: sum(rate(controller_runtime_reconcile_errors_total{job="nodeecho-metrics"}[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: NodeEcho reconciles keep failing.
+            description: >-
+              Reconciles have been failing for 15 minutes; the failed pods are
+              retried with backoff. The log line "Reconciler error" says why.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoreconcileerrors
+        - alert: NodeEchoWritesRejected
+          expr: sum by (rule) (increase(nodeecho_pod_writes_total{job="nodeecho-metrics", result="rejected"}[30m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: The API server rejects writes of NodeEcho rule {{ $labels.rule }}.
+            description: >-
+              Usually a key missing from the nodeecho-writer-scope policy's
+              allowed list, or annotations over the size limit. The pods'
+              KeySkipped Events give the API server's message.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechowritesrejected
+        - alert: NodeEchoEchoSlow
+          expr: >-
+            histogram_quantile(0.99, sum by (le) (rate(workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="pods"}[10m]))) > 60
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Pods wait more than a minute for NodeEcho.
+            description: >-
+              The 99th percentile of the time a pod waits in NodeEcho's queue has
+              been above 60 s for 15 minutes: Node changes reach pods late.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoechoslow
+        - alert: NodeEchoKeysSkipped
+          expr: sum by (rule, reason) (increase(nodeecho_keys_skipped_total{job="nodeecho-metrics", reason!="rejected"}[1h])) > 0
+          labels:
+            severity: info
+          annotations:
+            summary: NodeEcho rule {{ $labels.rule }} skips keys ({{ $labels.reason }}).
+            description: >-
+              owned-by-other: another writer, often the pod template, holds the
+              key with another value. invalid-value: a Node value is not a valid
+              label value. The pods' KeySkipped Events name the keys.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/troubleshooting/#events

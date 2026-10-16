@@ -1,3 +1,4 @@
 resources:
   - deployment.yaml
   - rules.yaml
+  - metrics_service.yaml

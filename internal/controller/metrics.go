@@ -24,6 +24,18 @@ import (
 )
 
 var (
+	buildInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "nodeecho_build_info",
+		Help: "Always 1, labelled with the NodeEcho version and the Go version it was built with.",
+	}, []string{"version", "go_version"})
+	configLoads = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "nodeecho_config_loads_total",
+		Help: "Reads of the rules ConfigMap, by result: valid, invalid or missing.",
+	}, []string{"result"})
+	configLastValid = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "nodeecho_config_last_valid_timestamp_seconds",
+		Help: "Time of the last read of a valid configuration, in seconds since the epoch.",
+	})
 	configValid = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "nodeecho_config_valid",
 		Help: "1 when the last read configuration was valid, 0 when NodeEcho keeps an earlier one.",
@@ -47,5 +59,12 @@ var (
 )
 
 func init() {
-	metrics.Registry.MustRegister(configValid, rulesActive, rulesRefused, keysSkipped, podWrites)
+	metrics.Registry.MustRegister(buildInfo, configLoads, configLastValid, configValid, rulesActive, rulesRefused,
+		keysSkipped, podWrites)
+}
+
+// SetBuildInfo publishes nodeecho_build_info.
+func SetBuildInfo(version, goVersion string) {
+	buildInfo.Reset()
+	buildInfo.WithLabelValues(version, goVersion).Set(1)
 }

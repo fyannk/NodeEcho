@@ -35,8 +35,10 @@ The documentation site is built from [`web/`](web/docs/):
 
 - [Introduction](web/docs/overview/index.md) and [status](web/docs/overview/status.md)
 - [Getting started](web/docs/tutorials/getting-started.md)
-- [Configuration](web/docs/operator/configuration.md) and
-  [admission policies](web/docs/operator/admission-policies.md)
+- [Configuration](web/docs/operator/configuration.md),
+  [admission policies](web/docs/operator/admission-policies.md) and
+  [observability](web/docs/operator/observability.md): metrics, alerts,
+  dashboard, logs, pprof
 - [Contract v1](web/docs/reference/contract.md): the keys a consumer sees on
   its pods, and what it may rely on
 - [Design notes](web/docs/design/design.md) and research on
@@ -51,7 +53,8 @@ Go and controller-runtime; `make help` lists the targets.
 
 ```sh
 make test     # unit, fuzz-seed and envtest tests
-make lint     # golangci-lint and the toolchain check
+make lint     # golangci-lint, logging rules and the toolchain check
+make test-alerts  # promtool check and unit tests of the alerts (docker)
 make build    # bin/nodeecho
 make e2e      # end-to-end on throwaway k3d clusters: 1.34, 1.36, 1.36 with
               # PodTopologyLabelsAdmission off; needs docker, k3d, kubectl, jq

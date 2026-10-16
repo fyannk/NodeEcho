@@ -1,0 +1,10 @@
+# Bind it to the identity that scrapes NodeEcho, for instance Prometheus's
+# ServiceAccount: the metrics endpoint lets in only clients allowed to GET
+# /metrics. config/prometheus binds it for kube-prometheus.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nodeecho-metrics-reader
+rules:
+  - nonResourceURLs: [/metrics]
+    verbs: [get]
