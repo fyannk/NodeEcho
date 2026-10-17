@@ -32,27 +32,6 @@ import (
 	"github.com/fyannk/nodeecho/internal/config"
 )
 
-// KubernetesManagedLabels are the Node labels that Kubernetes 1.35 and later
-// copies onto pods at binding (PodTopologyLabelsAdmission).
-var KubernetesManagedLabels = map[string]bool{
-	"topology.kubernetes.io/zone":   true,
-	"topology.kubernetes.io/region": true,
-}
-
-// LeftToKubernetes reports whether the rule leaves Node label key to
-// Kubernetes: only a copy to the very same pod label, which is the one
-// Kubernetes writes.
-func LeftToKubernetes(l *config.LabelCopy, key string, opts Options) bool {
-	return opts.KubernetesCopiesTopology && !l.ForceKubernetesManaged &&
-		KubernetesManagedLabels[key] && l.Target == config.TargetLabels && l.Prefix == ""
-}
-
-// Options carries the cluster facts a projection depends on.
-type Options struct {
-	// KubernetesCopiesTopology is true on Kubernetes 1.35 and later.
-	KubernetesCopiesTopology bool
-}
-
 // Result is the desired metadata of one rule on one pod. Keys absent from
 // Labels and Annotations must be absent from the pod, as far as the rule
 // owns them.
@@ -70,8 +49,10 @@ type Skip struct {
 	Reason string
 }
 
-// Desired returns what rule writes on a pod bound to node.
-func Desired(rule config.Rule, node *corev1.Node, opts Options) (Result, error) {
+// Desired returns what rule writes on a pod bound to node. Whether a key is
+// written is decided later, from the pod: a key another writer already
+// holds is not NodeEcho's to write.
+func Desired(rule config.Rule, node *corev1.Node) (Result, error) {
 	res := Result{Labels: map[string]string{}, Annotations: map[string]string{}}
 	set := func(t config.Target, key, value string) {
 		if t == config.TargetLabels {
@@ -111,14 +92,9 @@ func Desired(rule config.Rule, node *corev1.Node, opts Options) (Result, error) 
 
 	if l := rule.Labels; l != nil {
 		for _, k := range l.Copy {
-			v, ok := node.Labels[k]
-			if !ok {
-				continue
+			if v, ok := node.Labels[k]; ok {
+				set(l.Target, l.Prefix+k, v)
 			}
-			if LeftToKubernetes(l, k, opts) {
-				continue
-			}
-			set(l.Target, l.Prefix+k, v)
 		}
 	}
 

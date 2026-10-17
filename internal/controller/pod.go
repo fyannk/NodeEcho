@@ -48,11 +48,9 @@ import (
 // NodeNameIndex indexes pods by spec.nodeName.
 const NodeNameIndex = "spec.nodeName"
 
-// Event reasons.
-const (
-	ReasonKeySkipped                = "KeySkipped"
-	ReasonKubernetesTopologyMissing = "KubernetesTopologyMissing"
-)
+// ReasonKeySkipped is the reason of the Warning Event for a configured key
+// that is not written.
+const ReasonKeySkipped = "KeySkipped"
 
 // PodReconciler writes each rule's projection on the pods it selects, with
 // one server-side apply field manager per rule, and removes what a rule no
@@ -61,7 +59,6 @@ type PodReconciler struct {
 	client.Client
 	Store    *Store
 	Recorder events.EventRecorder
-	Options  projection.Options
 	// Resync delivers the pods to reconcile after a rule change.
 	Resync <-chan event.GenericEvent
 }
@@ -105,11 +102,10 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		desired := projection.Result{}
 		if node != nil && inScope(rule, ns, pod, node) {
 			var err error
-			if desired, err = projection.Desired(rule.Rule, node, r.Options); err != nil {
+			if desired, err = projection.Desired(rule.Rule, node); err != nil {
 				errs = append(errs, err)
 				continue
 			}
-			r.warnMissingTopology(pod, node, rule)
 		}
 		errs = append(errs, r.sync(ctx, pod, rule.Name, rule.FieldManager(), desired))
 	}
@@ -128,28 +124,6 @@ func inScope(rule *Rule, ns *corev1.Namespace, pod *corev1.Pod, node *corev1.Nod
 	return rule.pods.Matches(labels.Set(pod.Labels)) &&
 		rule.namespaces.Matches(labels.Set(ns.Labels)) &&
 		rule.nodes.Matches(labels.Set(node.Labels))
-}
-
-// warnMissingTopology signals a pod lacking a zone or region label that
-// Kubernetes should have copied, see web/docs/reference/contract.md.
-func (r *PodReconciler) warnMissingTopology(pod *corev1.Pod, node *corev1.Node, rule *Rule) {
-	l := rule.Labels
-	if l == nil {
-		return
-	}
-	for _, k := range l.Copy {
-		if !projection.LeftToKubernetes(l, k, r.Options) {
-			continue
-		}
-		if _, onNode := node.Labels[k]; !onNode {
-			continue
-		}
-		if _, onPod := pod.Labels[k]; !onPod {
-			r.Recorder.Eventf(pod, nil, corev1.EventTypeWarning, ReasonKubernetesTopologyMissing, "Echo",
-				"rule %s: label %s is on node %s but not on the pod; Kubernetes did not copy it, set labels.forceKubernetesManaged to copy it",
-				rule.Name, k, node.Name)
-		}
-	}
 }
 
 // removedRule names a rule that no longer exists in metrics and Events:
@@ -222,14 +196,21 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 	}
 }
 
-// withoutForeign drops the keys that exist on the pod with another value and
-// that this manager does not own: another writer set them, and NodeEcho never
-// overwrites another writer's key.
+// withoutForeign drops the keys that exist on the pod and that this manager
+// does not own: another writer set them, and NodeEcho never overwrites
+// another writer's key. With another value, the key is skipped with an Event
+// and a metric. With the wanted value already there, nothing is wrong and
+// nothing is said: a key another writer keeps right needs no write, as the
+// zone and region Kubernetes copies at binding.
 func (r *PodReconciler) withoutForeign(ctx context.Context, pod *corev1.Pod, rule string, want, current map[string]string, owned map[string]bool) map[string]string {
 	out := make(map[string]string, len(want))
 	for k, v := range want {
-		if cur, exists := current[k]; exists && cur != v && !owned[k] {
-			r.skip(ctx, pod, rule, k, "owned-by-other", "key set by another writer")
+		if cur, exists := current[k]; exists && !owned[k] {
+			if cur != v {
+				r.skip(ctx, pod, rule, k, "owned-by-other", "key set by another writer")
+			} else {
+				log.FromContext(ctx).V(1).Info("Key already set by another writer", "rule", rule, "key", k)
+			}
 			continue
 		}
 		out[k] = v

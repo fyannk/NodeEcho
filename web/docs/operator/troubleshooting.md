@@ -29,10 +29,9 @@ Check, in order:
 
 | Reason | Meaning | What to do |
 | --- | --- | --- |
-| `KeySkipped` … `key set by another writer` | the key already holds another value, written by someone else, for instance from the pod template | remove it from the template, or use another key or a prefix |
+| `KeySkipped` … `key set by another writer` | the key already holds another value, written by someone else: the pod template, or Kubernetes' zone and region copied at binding when the Node's label changed since | remove it from the template, or use another key or a prefix |
 | `KeySkipped` … `invalid label value` | the Node value is not a valid label value | copy it as an annotation |
 | `KeySkipped` … `write rejected` | the API server refused the write: an admission policy, the annotations size limit, or no `patch` right | read the message; for the writer-scope policy, add the key to its allowed list |
-| `KubernetesTopologyMissing` | Kubernetes 1.35+ should have copied zone or region, and did not | if `PodTopologyLabelsAdmission` is off, set `labels.forceKubernetesManaged: true` |
 
 ## The configuration does not apply
 

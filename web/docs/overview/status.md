@@ -14,7 +14,8 @@ title: Status
   covering conflicts, foreign keys, scope changes, rule renames, invalid
   configurations, rejected writes and replaced pods.
 - An end-to-end test on throwaway k3d clusters for Kubernetes 1.34, 1.36,
-  and 1.36 with `PodTopologyLabelsAdmission` off: echo and cleanup, both
+  and 1.36 with `PodTopologyLabelsAdmission` off, where NodeEcho copies zone
+  and region itself: echo and cleanup, both
   admission policies, restarts, leader failover, invalid and missing
   configurations, and a cordon reaching 120 pods.
 - Authenticated HTTPS metrics, or plain HTTP with discovery annotations for

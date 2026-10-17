@@ -73,13 +73,17 @@ key on pods.
   characters of `[A-Za-z0-9._-]`, starting and ending alphanumeric, or empty).
   An invalid value is not written, a previously written value is removed, and
   NodeEcho emits a Warning Event on the pod and increments a metric.
-- On Kubernetes 1.35 and later, `topology.kubernetes.io/zone` and
-  `topology.kubernetes.io/region` copied as labels without a prefix are left
-  to Kubernetes unless the rule sets `labels.forceKubernetesManaged: true`.
-  A selected pod missing such a key while its Node has it gets a Warning
-  Event. Copied with a prefix or as annotations, they are pod keys Kubernetes
-  does not write, so NodeEcho copies them. `kubernetes.io/hostname` and every
-  other key are copied whenever configured.
+- A key the pod already carries at the Node's value, written by someone
+  else, is left alone: no write, no co-ownership, no Event. NodeEcho then
+  does not follow later Node changes for it, as for every key another writer
+  holds.
+- That rule is the whole treatment of `topology.kubernetes.io/zone` and
+  `topology.kubernetes.io/region`, which Kubernetes 1.35 and later copies
+  onto pods at binding: where Kubernetes copied them, NodeEcho writes
+  nothing; where it did not (before 1.35, or with `PodTopologyLabelsAdmission`
+  off), NodeEcho copies them like any other key and keeps following the Node
+  for them, also after a cluster upgrade. No version switch, no flag. Copied
+  with a prefix or as annotations, they are keys Kubernetes never writes.
 
 ### Eviction requests
 
@@ -161,7 +165,6 @@ rules:
     copy: [topology.kubernetes.io/zone]
     target: labels                  # labels | annotations
     prefix: ""
-    forceKubernetesManaged: false
   annotations:                      # optional block
     copy: []
     target: annotations             # annotations | labels
@@ -197,10 +200,6 @@ or a missing ConfigMap or key refuses the whole configuration, and NodeEcho
 keeps the last valid one. To stop writing, set `rules: []`. Until a first
 valid configuration is loaded, NodeEcho writes and removes nothing, and the
 elected instance reports not ready; standby instances report ready.
-
-The Kubernetes version, which decides whether zone and region are left to
-Kubernetes, is read at start: restart NodeEcho after upgrading the cluster
-past 1.35.
 
 ## Protection
 

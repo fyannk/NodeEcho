@@ -85,10 +85,9 @@ type TaintsEcho struct {
 
 // LabelCopy copies Node labels.
 type LabelCopy struct {
-	Copy                   []string `json:"copy"`
-	Target                 Target   `json:"target,omitempty"`
-	Prefix                 string   `json:"prefix,omitempty"`
-	ForceKubernetesManaged bool     `json:"forceKubernetesManaged,omitempty"`
+	Copy   []string `json:"copy"`
+	Target Target   `json:"target,omitempty"`
+	Prefix string   `json:"prefix,omitempty"`
 }
 
 // AnnotationCopy copies Node annotations.

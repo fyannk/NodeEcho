@@ -53,7 +53,6 @@ Warning Events on the pod, from `nodeecho`, through the `events.k8s.io` API:
 | Reason | Message |
 | --- | --- |
 | `KeySkipped` | `rule <name>: key <key> not written: <why>`, or `rule <name>: write rejected: <API error>` |
-| `KubernetesTopologyMissing` | `rule <name>: label <key> is on node <node> but not on the pod; Kubernetes did not copy it, set labels.forceKubernetesManaged to copy it` |
 | `EvictionRequested` (Normal) | `rule <name>: eviction request received` |
 | `EvictionRefused` | `rule <name>: eviction request refused: <message>` |
 

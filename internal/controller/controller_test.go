@@ -42,7 +42,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/fyannk/nodeecho/internal/config"
-	"github.com/fyannk/nodeecho/internal/projection"
 )
 
 // The tests run NodeEcho against a real API server (envtest). Without
@@ -59,11 +58,9 @@ const (
 )
 
 var (
-	// copiesTopology is true on Kubernetes 1.35 and later, as in main.
-	copiesTopology bool
-	k8s            client.Client
-	store          *Store
-	seq            atomic.Int32
+	k8s   client.Client
+	store *Store
+	seq   atomic.Int32
 )
 
 func TestMain(m *testing.M) {
@@ -98,9 +95,6 @@ func run(m *testing.M, cfg *rest.Config) int {
 	if err != nil {
 		panic(err)
 	}
-	if copiesTopology, err = KubernetesCopiesTopology(cfg); err != nil {
-		panic(err)
-	}
 	resync := make(chan event.GenericEvent)
 	if err := (&ConfigReconciler{
 		Client: mgr.GetClient(), ConfigMap: types.NamespacedName{Namespace: configNS, Name: configName},
@@ -109,8 +103,7 @@ func run(m *testing.M, cfg *rest.Config) int {
 		panic(err)
 	}
 	if err := (&PodReconciler{
-		Client: mgr.GetClient(), Store: store, Recorder: mgr.GetEventRecorder("nodeecho"),
-		Options: projection.Options{KubernetesCopiesTopology: copiesTopology}, Resync: resync,
+		Client: mgr.GetClient(), Store: store, Recorder: mgr.GetEventRecorder("nodeecho"), Resync: resync,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		panic(err)
 	}
@@ -321,8 +314,6 @@ func TestUnboundPodIsIgnored(t *testing.T) {
 }
 
 func TestForeignKeyIsNeverOverwritten(t *testing.T) {
-	// Not the zone label: Kubernetes 1.35+ itself sets it on pods created
-	// bound to a node.
 	setRules(t, `- name: racks
   podSelector: {matchLabels: {app: db}}
   unschedulable: {}
@@ -349,44 +340,65 @@ func hasEvent(ns, pod, reason string) bool {
 	return false
 }
 
-// The suite runs as on Kubernetes 1.35+, where zone and region belong to
-// Kubernetes, unless forceKubernetesManaged is set for a cluster with
-// PodTopologyLabelsAdmission off.
-func TestKubernetesManagedZone(t *testing.T) {
-	const zones = `- name: zones
+// A key another writer already keeps at the Node's value needs no write:
+// NodeEcho neither applies (it would become a co-owner) nor complains.
+func TestSameValueFromAnotherWriterIsLeftAlone(t *testing.T) {
+	setRules(t, dbRule)
+	f := newFixture(t, map[string]string{"app": "x"}, map[string]string{rack: "r1"})
+	p := newPod(f.ns, "same", f.node.Name, map[string]string{"app": "db", rack: "r1"}, nil)
+	must(k8s.Create(context.Background(), p))
+	consistently(t, "pod carrying the Node's value untouched", func() bool {
+		p := getPod(t, f.ns, "same")
+		return hasLabel(p, rack, "r1") && len(managers(p)) == 0 && !hasEvent(f.ns, "same", ReasonKeySkipped)
+	})
+}
+
+// Zone and region follow the same rule as every key. On an API server that
+// copies them at binding (1.35+ with PodTopologyLabelsAdmission), the pod
+// arrives with Kubernetes' value and NodeEcho writes nothing; where it does
+// not, NodeEcho copies them. No version switch, no flag.
+func TestZoneIsCopiedUnlessKubernetesDidIt(t *testing.T) {
+	setRules(t, `- name: zones
   podSelector: {matchLabels: {app: db}}
-  labels: {copy: [topology.kubernetes.io/zone]%s}
-`
-	setRules(t, fmt.Sprintf(zones, ""))
+  labels: {copy: [topology.kubernetes.io/zone]}
+`)
 	f := newFixture(t, map[string]string{"app": "db"}, map[string]string{zone: "a"})
-	if !copiesTopology {
-		// Before 1.35, NodeEcho copies the zone itself.
+	// The Create response says whether the API server copied the zone.
+	kubernetesCopied := f.pod.Labels[zone] == "a"
+	if kubernetesCopied {
+		consistently(t, "zone written by Kubernetes left alone", func() bool {
+			p := getPod(t, f.ns, "db")
+			return hasLabel(p, zone, "a") && len(managers(p)) == 0
+		})
+		// Kubernetes copies once; a later Node change is another writer's key.
+		f.updateNode(t, func(n *corev1.Node) { n.Labels[zone] = "moved" })
+		eventually(t, "KeySkipped event", func() bool { return hasEvent(f.ns, "db", ReasonKeySkipped) })
+		consistently(t, "Kubernetes' value kept", func() bool {
+			p := getPod(t, f.ns, "db")
+			return hasLabel(p, zone, "a") && len(managers(p)) == 0
+		})
+	} else {
 		eventually(t, "zone copied by NodeEcho", func() bool {
 			p := getPod(t, f.ns, "db")
 			return hasLabel(p, zone, "a") && slices.Equal(managers(p), []string{"nodeecho/zones"})
 		})
-		return
 	}
-	consistently(t, "zone left to Kubernetes", func() bool {
-		p := getPod(t, f.ns, "db")
-		return hasLabel(p, zone, "a") && len(managers(p)) == 0
-	})
 
-	// A pod Kubernetes did not label, as with the feature off: the zone
-	// reaches the node only after binding.
+	// The zone reaches the Node only after binding, as with the feature off:
+	// Kubernetes never copies it, NodeEcho does.
 	g := newFixture(t, map[string]string{"app": "db"}, nil)
 	g.updateNode(t, func(n *corev1.Node) { n.Labels = map[string]string{zone: "b"} })
-	eventually(t, "KubernetesTopologyMissing event", func() bool {
-		return hasEvent(g.ns, "db", ReasonKubernetesTopologyMissing)
+	eventually(t, "zone copied by NodeEcho after binding", func() bool {
+		p := getPod(t, g.ns, "db")
+		return hasLabel(p, zone, "b") && slices.Equal(managers(p), []string{"nodeecho/zones"})
 	})
-	if p := getPod(t, g.ns, "db"); p.Labels[zone] != "" || len(managers(p)) != 0 {
-		t.Fatalf("zone written without forceKubernetesManaged: %v %v", p.Labels, managers(p))
-	}
-
-	setRules(t, fmt.Sprintf(zones, ", forceKubernetesManaged: true"))
-	eventually(t, "zone copied when forced", func() bool { return hasLabel(getPod(t, g.ns, "db"), zone, "b") })
+	// A key NodeEcho owns keeps following the Node, whatever the cluster
+	// version: an upgrade past 1.35 changes nothing for existing pods.
 	g.updateNode(t, func(n *corev1.Node) { n.Labels[zone] = "c" })
-	eventually(t, "forced zone follows the node", func() bool { return hasLabel(getPod(t, g.ns, "db"), zone, "c") })
+	eventually(t, "owned zone follows the node", func() bool {
+		p := getPod(t, g.ns, "db")
+		return hasLabel(p, zone, "c") && slices.Equal(managers(p), []string{"nodeecho/zones"})
+	})
 }
 
 func TestLeavingScopeAndRuleRemovalCleanUp(t *testing.T) {

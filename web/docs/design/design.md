@@ -60,8 +60,7 @@ rules:
     copy: [topology.kubernetes.io/zone, rack.example.org/id]
     target: labels              # or annotations (ECK reads annotations)
     prefix: ""                  # optional: <prefix><key> for keys that could clash
-    forceKubernetesManaged: false
-  annotations:                  # node annotations, same fields minus forceKubernetesManaged
+  annotations:                  # node annotations, same fields
     copy: [rack.example.org/position]
     target: annotations         # default; labels only for label-safe values
     prefix: ""
@@ -145,15 +144,17 @@ startup.
   Percona MongoDB and CloudNativePG labels ([operators survey](../research/operators.md)).
 - Values follow later node changes, whereas KEP-4742 copies once at binding;
   this difference is documented.
-- On Kubernetes 1.35 and later (version read from `/version`, readable by
-  every authenticated client), the keys that Kubernetes copies itself
-  (`topology.kubernetes.io/zone` and `/region`, not `kubernetes.io/hostname`)
-  are left to Kubernetes by default. `forceKubernetesManaged` copies them
-  anyway, for clusters where the feature gate is off or distributions that
-  differ. Without it, a selected pod missing such a key while its node has it
-  gets a Warning Event and a metric: it signals the flag, it does not copy
-  silently. Keys that Kubernetes does not copy are always copied when
-  configured.
+- A key the pod already holds at the Node's value, written by someone else,
+  is left alone: no write, no co-ownership, no Event. Server-side apply
+  ownership says who wrote it, so the rule needs no cluster facts. It is the
+  whole treatment of the keys Kubernetes 1.35 and later copies itself
+  (`topology.kubernetes.io/zone` and `/region`, not `kubernetes.io/hostname`):
+  no version probe, no flag. Where Kubernetes copied them, NodeEcho has
+  nothing to do; where it did not (older clusters, feature gate off),
+  NodeEcho copies them like any other key, and after an upgrade the pods it
+  labelled keep its labels while new pods get Kubernetes'. A version switch
+  was tried first and stripped the labels from every existing pod after an
+  upgrade, since Kubernetes copies only at binding.
 
 ### Copied annotations
 
@@ -169,8 +170,8 @@ startup.
   a value that is not a valid label value is not written; the pod gets a
   Warning Event and a metric, and a previously copied value is removed rather
   than left stale.
-- Kubernetes does not copy node annotations to pods, so there is no
-  `forceKubernetesManaged` here: configured keys are always copied.
+- Kubernetes does not copy node annotations to pods: configured keys are
+  always copied.
 - Values follow later node changes, as for labels.
 
 ## Illustrative pod metadata

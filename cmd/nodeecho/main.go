@@ -55,7 +55,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/fyannk/nodeecho/internal/controller"
-	"github.com/fyannk/nodeecho/internal/projection"
 )
 
 var (
@@ -126,11 +125,6 @@ func main() {
 	}
 
 	restConfig := ctrl.GetConfigOrDie()
-	copiesTopology, err := controller.KubernetesCopiesTopology(restConfig)
-	if err != nil {
-		setupLog.Error(err, "Unable to read the Kubernetes version")
-		os.Exit(1)
-	}
 	controller.SetBuildInfo(version, goVersion())
 
 	if metricsAddr == "" {
@@ -185,7 +179,6 @@ func main() {
 		Client:   mgr.GetClient(),
 		Store:    store,
 		Recorder: mgr.GetEventRecorder("nodeecho"),
-		Options:  projection.Options{KubernetesCopiesTopology: copiesTopology},
 		Resync:   resync,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "Unable to set up the pod controller")
@@ -252,7 +245,7 @@ func main() {
 	}
 
 	setupLog.Info("Starting manager", "version", version, "goVersion", goVersion(),
-		"configMap", configNamespace+"/"+configName, "kubernetesCopiesTopology", copiesTopology,
+		"configMap", configNamespace+"/"+configName,
 		"leaderElection", leaderElect, "metricsAddress", metricsAddr, "metricsSecure", metricsSecure,
 		"pprofAddress", pprofAddr, "webhookPort", webhookPort, "certDir", certDir, "certRotation", certRotation)
 	if err := mgr.Start(ctx); err != nil {

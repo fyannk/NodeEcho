@@ -42,7 +42,6 @@ Each block is optional, but a rule needs at least one. Every field is in the
 | `labels` | `copy` | required | Node label keys |
 | | `target` | `labels` | where they go on the pod |
 | | `prefix` | `""` | prepended to each key |
-| | `forceKubernetesManaged` | `false` | copy zone and region even on 1.35+ |
 | `annotations` | `copy` | required | Node annotation keys |
 | | `target` | `annotations` | where they go on the pod |
 | | `prefix` | `""` | prepended to each key |
@@ -93,16 +92,17 @@ labels:
 
 ## Zone and region
 
-From Kubernetes 1.35, Kubernetes copies `topology.kubernetes.io/zone` and
-`topology.kubernetes.io/region` onto pods at binding. A rule copying them as
-plain labels leaves them to Kubernetes; a pod that should have them but does
-not gets a `KubernetesTopologyMissing` Warning Event. On a cluster where
-`PodTopologyLabelsAdmission` is turned off, set
-`labels.forceKubernetesManaged: true` and NodeEcho copies them.
+From Kubernetes 1.35, `PodTopologyLabelsAdmission` copies
+`topology.kubernetes.io/zone` and `topology.kubernetes.io/region` onto pods
+at binding. A rule listing them needs no special case: a pod that already
+carries the Node's value from Kubernetes is left alone, and a pod that does
+not, on an older cluster or with the feature off, gets them from NodeEcho.
+After a cluster upgrade, the pods NodeEcho labelled keep its labels and new
+pods get Kubernetes'; nothing to restart or reconfigure.
 
-Copied with a prefix or as annotations, they are keys Kubernetes does not
-write, so NodeEcho copies them in any case. The Kubernetes version is read at
-start: restart NodeEcho after upgrading the cluster past 1.35.
+Kubernetes copies once, at binding; NodeEcho follows later Node changes only
+for the keys it wrote itself. Copied with a prefix or as annotations, they
+are keys Kubernetes does not write, so NodeEcho always copies them.
 
 ## What is refused
 

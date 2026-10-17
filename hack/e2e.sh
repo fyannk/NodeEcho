@@ -4,10 +4,11 @@
 #
 # End-to-end test of NodeEcho on throwaway k3d clusters, one per variant:
 #
-#   k8s-1.34  Kubernetes before 1.35: NodeEcho copies zone and region itself.
-#   k8s-1.36  Kubernetes copies zone and region at binding; NodeEcho leaves them.
-#   gate-off  1.36 with PodTopologyLabelsAdmission off: NodeEcho warns, and
-#             copies them once the rule sets forceKubernetesManaged.
+#   k8s-1.34  Kubernetes before 1.35 does not copy zone and region: NodeEcho does.
+#   k8s-1.36  Kubernetes copies zone and region at binding: another writer's
+#             keys, NodeEcho leaves them alone.
+#   gate-off  1.36 with PodTopologyLabelsAdmission off: nobody copied them,
+#             NodeEcho does. The rule is general, not a version switch.
 #   cert-manager  1.36, with the webhook certificate from cert-manager rather
 #             than NodeEcho's own rotation.
 #   helm      1.36, installed with the Helm chart.
@@ -248,9 +249,7 @@ rules:
   podSelector: {matchLabels: {app: e2e-db}}
   unschedulable: {}
   taints: {copy: [e2e.example.org/drain]}
-  labels:
-    copy: [topology.kubernetes.io/zone, topology.kubernetes.io/region, rack.example.org/id]
-    forceKubernetesManaged: ${1:-false}
+  labels: {copy: [topology.kubernetes.io/zone, topology.kubernetes.io/region, rack.example.org/id]}
   annotations: {copy: [rack.example.org/position]}
   eviction: {}
 - name: zone-annotation
@@ -511,22 +510,20 @@ scenario_healthy() {
 	local zone
 	zone=$(node_label "$(node_of db-0)" topology.kubernetes.io/zone)
 	case $variant in
-	k8s-1.34)
-		wait_for "zone label copied by NodeEcho before 1.35" owns_label db-0 nodeecho/db topology.kubernetes.io/zone
+	k8s-1.34 | gate-off)
+		# Kubernetes did not copy them (too old, or the feature off): NodeEcho does.
+		wait_for "zone label copied by NodeEcho ($variant)" owns_label db-0 nodeecho/db topology.kubernetes.io/zone
 		label_is db-0 topology.kubernetes.io/zone "$zone" || fail "zone value"
+		wait_for "region label copied by NodeEcho ($variant)" owns_label db-0 nodeecho/db topology.kubernetes.io/region
+		label_is db-0 topology.kubernetes.io/region region-1 || fail "region value"
 		;;
 	k8s-1.36)
 		label_is db-0 topology.kubernetes.io/zone "$zone" ||
 			fail "Kubernetes did not copy the zone: is PodTopologyLabelsAdmission enabled in this k3s?"
 		ok "zone label set by Kubernetes at binding"
-		hold 5 "NodeEcho leaves the zone label to Kubernetes" not_owns_label db-0 nodeecho/db topology.kubernetes.io/zone
-		;;
-	gate-off)
-		label_absent db-0 topology.kubernetes.io/zone || fail "zone label present although the feature is off"
-		wait_for "KubernetesTopologyMissing Warning Event" has_event db-0 KubernetesTopologyMissing
-		db_rules true | set_rules
-		wait_for "forceKubernetesManaged copies the zone" label_is db-0 topology.kubernetes.io/zone "$zone"
-		wait_for "and the region" label_is db-0 topology.kubernetes.io/region region-1
+		hold 5 "a key another writer keeps right needs no write" not_owns_label db-0 nodeecho/db topology.kubernetes.io/zone
+		! has_event db-0 KeySkipped || fail "KeySkipped Event for a key Kubernetes keeps right"
+		ok "no Event for it either"
 		;;
 	esac
 }
@@ -597,7 +594,7 @@ scenario_writer_scope() {
 	denied "forbidden" as_nodeecho DELETE db-0 "" "?dryRun=All" || fail "NodeEcho could delete a pod"
 	ok "deleting a pod is denied"
 
-	(db_rules "$FORCE" && cat <<RULES
+	(db_rules && cat <<RULES
 - name: outside
   podSelector: {matchLabels: {app: e2e-db}}
   labels: {copy: [rack.example.org/id], prefix: outside.}
@@ -605,7 +602,7 @@ RULES
 	) | set_rules
 	wait_for "a rule writing outside the allowed list gets a Warning Event" event_says db-0 KeySkipped "rule outside: write rejected"
 	label_absent db-0 outside.rack.example.org/id || fail "the key outside the allowed list was written"
-	db_rules "$FORCE" | set_rules
+	db_rules | set_rules
 	wait_for "rule removed" metric_is nodeecho_rules_active 2
 }
 
@@ -682,7 +679,7 @@ scenario_eviction() {
 	wait_for "EvictionRequested event" has_event evictee EvictionRequested
 	release evictee
 
-	(db_rules "$FORCE" && cat <<RULES
+	(db_rules && cat <<RULES
 - name: hold
   podSelector: {matchLabels: {app: e2e-hold}}
   eviction: {key: e2e.example.org/eviction-refused-at, response: deny, message: "switch over first"}
@@ -697,7 +694,7 @@ RULES
 
 	if [[ $INSTALL == olm ]]; then
 		release holdee
-		db_rules "$FORCE" | set_rules
+		db_rules | set_rules
 		wait_for "rules restored" metric_is nodeecho_rules_active 2
 		return
 	fi
@@ -710,7 +707,7 @@ RULES
 	k scale -n "$SYS" deployment/nodeecho --replicas=1 >/dev/null
 	TIMEOUT=180 wait_for "NodeEcho back" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
 	TIMEOUT=60 wait_for "leader ready" leader_ready
-	db_rules "$FORCE" | set_rules
+	db_rules | set_rules
 	wait_for "rules restored" metric_is nodeecho_rules_active 2
 }
 
@@ -829,12 +826,12 @@ scenario_bad_config() {
 	printf 'version: 1\n' | set_rules
 	hold 5 "a missing rules field removes nothing" label_is db-0 nodeecho.fyannk.dev/unschedulable true
 
-	db_rules "$FORCE" | sed 's/podSelector: {matchLabels: {app: e2e-db}}/podSelector: {}/' | set_rules
+	db_rules | sed 's/podSelector: {matchLabels: {app: e2e-db}}/podSelector: {}/' | set_rules
 	wait_for "typo: config valid again" metric_is nodeecho_config_valid 1
 	wait_for "typo: the rules are refused" metric_is nodeecho_rules_refused 2
 	k uncordon "$n" >/dev/null
 	wait_for "the refused rules keep running their last version" label_absent db-0 nodeecho.fyannk.dev/unschedulable
-	db_rules "$FORCE" | set_rules
+	db_rules | set_rules
 	wait_for "rules fixed" metric_is nodeecho_rules_refused 0
 }
 
@@ -858,7 +855,7 @@ scenario_missing_config() {
 	grep -q 'Rules ConfigMap not found' <<<"$logs" || fail "no log line for the missing ConfigMap"
 	ok "the missing ConfigMap is logged"
 
-	db_rules "$FORCE" | set_rules
+	db_rules | set_rules
 	TIMEOUT=60 wait_for "ready once the ConfigMap exists" leader_ready
 	wait_for "then the uncordon is echoed" label_absent db-0 nodeecho.fyannk.dev/unschedulable
 }
@@ -869,7 +866,7 @@ scenario_bulk() {
 	k create deployment bulk -n "$NS" --image="$PAUSE" --replicas="$BULK" >/dev/null
 	k patch deployment bulk -n "$NS" --type=merge -p '{"spec":{"template":{"spec":{"terminationGracePeriodSeconds":0}}}}' >/dev/null
 	TIMEOUT=300 wait_for "$BULK pods ready" k rollout status -n "$NS" deployment/bulk --timeout=5s
-	(db_rules "$FORCE" && cat <<EOF
+	(db_rules && cat <<EOF
 - name: bulk
   podSelector: {matchLabels: {app: bulk}}
   unschedulable: {key: e2e.example.org/cordoned}
@@ -963,9 +960,6 @@ run_variant() {
 		EXTRA_COMPONENTS=cert-manager
 	fi
 	echo "   $(k version -o json | jq -r .serverVersion.gitVersion), kubeconfig $KCFG"
-	FORCE=false
-	[[ $variant == gate-off ]] && FORCE=true
-
 	deploy
 	workload
 	scenario_idle

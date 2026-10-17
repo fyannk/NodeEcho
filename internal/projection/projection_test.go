@@ -51,9 +51,9 @@ func rule() config.Rule {
 	}
 }
 
-func desired(t *testing.T, r config.Rule, n *corev1.Node, opts Options) Result {
+func desired(t *testing.T, r config.Rule, n *corev1.Node) Result {
 	t.Helper()
-	res, err := Desired(r, n, opts)
+	res, err := Desired(r, n)
 	if err != nil {
 		t.Fatalf("Desired: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestHealthyNodeWritesOnlyCopies(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{zone: "a", "other": "x"}},
 		Spec:       corev1.NodeSpec{Taints: []corev1.Taint{{Key: "dedicated", Effect: corev1.TaintEffectNoSchedule}}},
 	}
-	res := desired(t, rule(), n, Options{})
+	res := desired(t, rule(), n)
 	if want := map[string]string{zone: "a"}; !maps.Equal(res.Labels, want) {
 		t.Errorf("labels = %v, want %v", res.Labels, want)
 	}
@@ -85,7 +85,7 @@ func TestCordonedAndTaintedNode(t *testing.T) {
 			{Key: "karpenter.sh/disrupted", Effect: corev1.TaintEffectNoExecute},
 		},
 	}}
-	res := desired(t, rule(), n, Options{})
+	res := desired(t, rule(), n)
 	if res.Labels[uKey] != "true" {
 		t.Errorf("unschedulable label = %q, want \"true\"", res.Labels[uKey])
 	}
@@ -100,7 +100,7 @@ func TestCordonedAndTaintedNode(t *testing.T) {
 func TestUnschedulableAsAnnotation(t *testing.T) {
 	r := rule()
 	r.Unschedulable.Target = config.TargetAnnotations
-	res := desired(t, r, &corev1.Node{Spec: corev1.NodeSpec{Unschedulable: true}}, Options{})
+	res := desired(t, r, &corev1.Node{Spec: corev1.NodeSpec{Unschedulable: true}})
 	if res.Annotations[uKey] != "true" || res.Labels[uKey] != "" {
 		t.Errorf("labels=%v annotations=%v", res.Labels, res.Annotations)
 	}
@@ -114,7 +114,7 @@ func TestCopiesKeepValuesAndUsePrefix(t *testing.T) {
 		Labels:      map[string]string{"rack.example.org/id": ""},
 		Annotations: map[string]string{"rack.example.org/position": "row 3, slot 12"},
 	}}
-	res := desired(t, r, n, Options{})
+	res := desired(t, r, n)
 	want := map[string]string{"node.rack.example.org/id": "", "rack.example.org/position": "row 3, slot 12"}
 	if !maps.Equal(res.Annotations, want) {
 		t.Errorf("annotations = %v, want %v", res.Annotations, want)
@@ -125,7 +125,7 @@ func TestInvalidLabelValueIsSkipped(t *testing.T) {
 	r := rule()
 	r.Annotations.Target = config.TargetLabels
 	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"rack.example.org/position": "row 3, slot 12"}}}
-	res := desired(t, r, n, Options{})
+	res := desired(t, r, n)
 	if _, ok := res.Labels["rack.example.org/position"]; ok {
 		t.Fatal("an invalid label value must not be written")
 	}
@@ -134,19 +134,14 @@ func TestInvalidLabelValueIsSkipped(t *testing.T) {
 	}
 }
 
-func TestKubernetesManagedTopology(t *testing.T) {
+// Zone and region are keys like any other: the projection copies them when
+// configured. Whether Kubernetes already put them on the pod is the
+// reconciler's business, not the projection's.
+func TestTopologyIsCopiedLikeAnyKey(t *testing.T) {
 	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{zone: "a", "rack.example.org/id": "r1"}}}
-
-	res := desired(t, rule(), n, Options{KubernetesCopiesTopology: true})
-	if want := map[string]string{"rack.example.org/id": "r1"}; !maps.Equal(res.Labels, want) {
-		t.Errorf("on 1.35+, zone is left to Kubernetes: labels = %v, want %v", res.Labels, want)
-	}
-
-	r := rule()
-	r.Labels.ForceKubernetesManaged = true
-	res = desired(t, r, n, Options{KubernetesCopiesTopology: true})
-	if res.Labels[zone] != "a" {
-		t.Errorf("forceKubernetesManaged must copy zone, labels = %v", res.Labels)
+	res := desired(t, rule(), n)
+	if want := map[string]string{zone: "a", "rack.example.org/id": "r1"}; !maps.Equal(res.Labels, want) {
+		t.Errorf("labels = %v, want %v", res.Labels, want)
 	}
 }
 
@@ -155,7 +150,7 @@ func TestEmptyRuleBlocksWriteNothing(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{zone: "a"}},
 		Spec:       corev1.NodeSpec{Unschedulable: true},
 	}
-	res := desired(t, config.Rule{Name: "r"}, n, Options{})
+	res := desired(t, config.Rule{Name: "r"}, n)
 	if len(res.Labels)+len(res.Annotations)+len(res.Skipped) != 0 {
 		t.Errorf("a rule without blocks wrote %+v", res)
 	}
@@ -163,18 +158,17 @@ func TestEmptyRuleBlocksWriteNothing(t *testing.T) {
 
 func TestTopologyWithAPrefixOrAsAnnotationIsCopied(t *testing.T) {
 	n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{zone: "a"}}}
-	opts := Options{KubernetesCopiesTopology: true}
 
 	r := rule()
 	r.Labels.Target = config.TargetAnnotations
-	if res := desired(t, r, n, opts); res.Annotations[zone] != "a" {
-		t.Errorf("Kubernetes writes no zone annotation: annotations = %v", res.Annotations)
+	if res := desired(t, r, n); res.Annotations[zone] != "a" {
+		t.Errorf("zone as an annotation: annotations = %v", res.Annotations)
 	}
 
 	r = rule()
 	r.Labels.Prefix = "node."
-	if res := desired(t, r, n, opts); res.Labels["node."+zone] != "a" {
-		t.Errorf("Kubernetes writes no prefixed label: labels = %v", res.Labels)
+	if res := desired(t, r, n); res.Labels["node."+zone] != "a" {
+		t.Errorf("prefixed zone: labels = %v", res.Labels)
 	}
 }
 
@@ -209,7 +203,7 @@ func FuzzDesired(f *testing.F) {
 				},
 			},
 		}
-		res := desired(t, r, n, Options{KubernetesCopiesTopology: true})
+		res := desired(t, r, n)
 
 		for k, v := range res.Labels {
 			if msgs := validation.IsValidLabelValue(v); len(msgs) > 0 {

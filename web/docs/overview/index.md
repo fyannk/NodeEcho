@@ -57,8 +57,9 @@ flowchart LR
 - **Not a policy engine.** NodeEcho never decides that a node is draining,
   healthy or ready. It copies facts; each consumer applies its own policy.
 - **Not a replacement for Kubernetes topology labels.** From Kubernetes
-  1.35, Kubernetes copies zone and region onto pods at binding; NodeEcho
-  leaves those to Kubernetes unless told otherwise.
+  1.35, Kubernetes copies zone and region onto pods at binding; a pod that
+  already has them is left alone, and NodeEcho only fills the gap where
+  Kubernetes did not.
 - **Not a hard dependency.** Consumers must keep working, with reduced
   behaviour, when NodeEcho is absent. An absent key means "not set" or "not
   projected yet".

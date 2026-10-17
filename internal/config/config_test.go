@@ -254,9 +254,10 @@ func TestParseEchoKeyAsAnotherRulesCopyRefusesBoth(t *testing.T) {
 func TestParseWholeDocumentTypeErrors(t *testing.T) {
 	// Unknown fields and wrong types refuse the whole document, not one rule.
 	for name, doc := range map[string]string{
-		"misspelt field":       header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], prefx: p.}\n",
-		"copy is not a list":   header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: zone}\n",
-		"force is not boolean": header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], forceKubernetesManaged: yes please}\n",
+		"misspelt field":         header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], prefx: p.}\n",
+		"copy is not a list":     header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: zone}\n",
+		"target is not a string": header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], target: [labels]}\n",
+		"removed field":          header + "- name: a\n  podSelector: {matchLabels: {app: db}}\n  labels: {copy: [z], forceKubernetesManaged: true}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := Parse([]byte(doc)); err == nil {
