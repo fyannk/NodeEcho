@@ -94,6 +94,14 @@ A fresh install with `self` takes up to a minute to become ready: the leader
 writes the certificate into the Secret, then the kubelet updates the mounted
 files.
 
+The manifests ship that Secret empty, because cert-controller fills an
+existing Secret and never creates one. On Kubernetes 1.28 and later, the API
+server answers the creation of an empty `kubernetes.io/tls` Secret with the
+warning `tls: failed to find any PEM data in certificate input`, printed once
+by `kubectl apply` or `helm install`. It is expected and harmless: the leader
+replaces the content within seconds. The `cert-manager` and OLM providers
+create no empty Secret and print no warning.
+
 ## Check it
 
 ```bash
