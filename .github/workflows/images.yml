@@ -11,10 +11,11 @@ permissions:
 
 jobs:
   build-push:
-    name: Build and push images
+    name: Build, push and sign images
     permissions:
       contents: read # check out the private repository
       packages: write # push to ghcr
+      id-token: write # OIDC identity for the keyless cosign signature
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -40,30 +41,55 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Cross-compiled on the runner for each platform, no emulation.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      # Cross-compiled on the runner for each platform, no emulation. BuildKit
+      # attaches an SBOM and a full provenance attestation to the image index.
       - name: NodeEcho
+        id: nodeecho
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: mode=max
+          sbom: true
           build-args: VERSION=${{ steps.tag.outputs.tag }}
           tags: ghcr.io/${{ github.repository_owner }}/nodeecho:${{ steps.tag.outputs.tag }}
 
       - name: OLM bundle
+        id: bundle
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: deploy/olm/bundle
           file: deploy/olm/bundle.Dockerfile
           push: true
+          provenance: mode=max
           tags: ghcr.io/${{ github.repository_owner }}/nodeecho-bundle:${{ steps.tag.outputs.tag }}
 
       - name: OLM catalog
+        id: catalog
         if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: deploy/olm/catalog
           file: deploy/olm/catalog.Dockerfile
           push: true
+          provenance: mode=max
           tags: ghcr.io/${{ github.repository_owner }}/nodeecho-catalog:${{ steps.tag.outputs.tag }}
+
+      # Keyless: the signature binds the image digest to this workflow's
+      # identity (repository, workflow file, ref), recorded in Rekor.
+      - name: Sign the images
+        env:
+          OWNER: ${{ github.repository_owner }}
+          NODEECHO: ${{ steps.nodeecho.outputs.digest }}
+          BUNDLE: ${{ steps.bundle.outputs.digest }}
+          CATALOG: ${{ steps.catalog.outputs.digest }}
+        run: |
+          cosign sign --yes "ghcr.io/${OWNER}/nodeecho@${NODEECHO}"
+          [ -z "$BUNDLE" ] || cosign sign --yes "ghcr.io/${OWNER}/nodeecho-bundle@${BUNDLE}"
+          [ -z "$CATALOG" ] || cosign sign --yes "ghcr.io/${OWNER}/nodeecho-catalog@${CATALOG}"

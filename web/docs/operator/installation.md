@@ -24,6 +24,33 @@ Images are published for `linux/amd64` and `linux/arm64`:
 No version is released yet: until then, build the image with
 `make docker-build IMG=<your image>`.
 
+### Verify what you install
+
+Every image and the chart are signed keyless with [cosign](https://docs.sigstore.dev/)
+by the GitHub Actions workflow that built them; the signature binds the
+digest to the repository, the workflow file and the git ref, and is recorded
+in the Rekor transparency log. The NodeEcho image also carries an SBOM
+(SPDX) and a SLSA provenance attestation attached by BuildKit.
+
+```bash
+# A released image, or the chart: built by the images or release workflow on a tag.
+cosign verify ghcr.io/fyannk/nodeecho:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/fyannk/NodeEcho/\.github/workflows/(images|release)\.yml@refs/tags/v'
+cosign verify ghcr.io/fyannk/charts/nodeecho:<version> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/fyannk/NodeEcho/\.github/workflows/release\.yml@refs/tags/v'
+
+# The SBOM and the provenance of the image.
+docker buildx imagetools inspect ghcr.io/fyannk/nodeecho:<version> --format '{{ json .SBOM }}'
+docker buildx imagetools inspect ghcr.io/fyannk/nodeecho:<version> --format '{{ json .Provenance }}'
+```
+
+The `latest` image is built from `main` on every push and signed the same
+way, with `@refs/heads/main` as the identity suffix. An admission policy
+such as Kyverno's `verifyImages` or Sigstore's policy-controller can require
+these signatures before a NodeEcho pod starts.
+
 ## Requirements
 
 - Kubernetes 1.30 or later; tested on 1.34 and 1.36.
