@@ -89,9 +89,9 @@ variants and validates the bundle and the catalog when `operator-sdk` and
 A `v*` tag publishes the multi-arch image, the bundle and catalog images, and
 the chart (`images.yml`, `release.yml`); the tag must match the chart's
 version. Every image and the chart are signed keyless with cosign by the
-workflow, and the NodeEcho image carries an SBOM and a provenance
-attestation from BuildKit; [Installation](operator/installation.md) says how
-to verify them.
+workflow and get a GitHub build provenance attestation; the NodeEcho image
+also carries an SBOM and a provenance attestation from BuildKit.
+[Installation](operator/installation.md) says how to verify them.
 
 ## Dependencies
 

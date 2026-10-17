@@ -14,7 +14,8 @@ jobs:
     permissions:
       contents: write # create the release
       packages: write # push the chart to ghcr
-      id-token: write # OIDC identity for the keyless cosign signature
+      id-token: write # OIDC identity for the keyless cosign signature and the attestations
+      attestations: write # store the build provenance on GitHub
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -38,6 +39,7 @@ jobs:
       # and Argo and Flux both read it. Signed keyless by digest, like the
       # images; the release carries the same archive as a file.
       - name: Push and sign the chart
+        id: chart
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,6 +52,20 @@ jobs:
           digest=$(sed -n 's/^Digest: //p' <<<"$out")
           [ -n "$digest" ] || { echo "::error::helm push printed no digest"; exit 1; }
           cosign sign --yes "ghcr.io/${OWNER}/charts/nodeecho@${digest}"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      # GitHub's own provenance for the chart, as an OCI artifact and as the
+      # archive attached to the release.
+      - name: Attest the chart
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository_owner }}/charts/nodeecho
+          subject-digest: ${{ steps.chart.outputs.digest }}
+          push-to-registry: true
+      - name: Attest the chart archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tgz
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:

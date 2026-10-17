@@ -29,8 +29,10 @@ No version is released yet: until then, build the image with
 Every image and the chart are signed keyless with [cosign](https://docs.sigstore.dev/)
 by the GitHub Actions workflow that built them; the signature binds the
 digest to the repository, the workflow file and the git ref, and is recorded
-in the Rekor transparency log. The NodeEcho image also carries an SBOM
-(SPDX) and a SLSA provenance attestation attached by BuildKit.
+in the Rekor transparency log. The same workflows record a GitHub build
+provenance attestation for each image and for the chart. The NodeEcho image
+also carries an SBOM (SPDX) and a SLSA provenance attestation attached by
+BuildKit.
 
 ```bash
 # A released image, or the chart: built by the images or release workflow on a tag.
@@ -40,6 +42,10 @@ cosign verify ghcr.io/fyannk/nodeecho:<version> \
 cosign verify ghcr.io/fyannk/charts/nodeecho:<version> \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github.com/fyannk/NodeEcho/\.github/workflows/release\.yml@refs/tags/v'
+
+# GitHub's own build provenance, for an image and for the chart archive of a release.
+gh attestation verify oci://ghcr.io/fyannk/nodeecho:<version> --owner fyannk
+gh attestation verify nodeecho-<version>.tgz --owner fyannk
 
 # The SBOM and the provenance of the image.
 docker buildx imagetools inspect ghcr.io/fyannk/nodeecho:<version> --format '{{ json .SBOM }}'
