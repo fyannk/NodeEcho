@@ -17,11 +17,16 @@ operator.
 - Limits propagation to selected namespaces, workloads and nodes.
 - Writes nothing when there is nothing to echo, and never overwrites another
   writer's keys.
+- Optionally records eviction requests on the pods, and answers them.
+
+Install it with the Helm chart (`deploy/helm/nodeecho`), kustomize
+(`config/`) or OLM (`deploy/olm`); see
+[Installation](web/docs/operator/installation.md).
 
 **Status: early implementation, not production-ready.** Contract v1 is
 implemented, tested against a real API server (envtest) and end to end on k3d
-clusters (Kubernetes 1.34, 1.36, and 1.36 with `PodTopologyLabelsAdmission`
-off). No image is released yet. Upstream CloudNativePG does not consume
+clusters (Kubernetes 1.34, 1.36, 1.36 with `PodTopologyLabelsAdmission`
+off, and each install path). No version is released yet. Upstream CloudNativePG does not consume
 NodeEcho metadata; an integration is required. Compatibility with individual
 forks remains to be validated.
 
@@ -36,6 +41,7 @@ The documentation site is built from [`web/`](web/docs/):
 - [Introduction](web/docs/overview/index.md) and [status](web/docs/overview/status.md)
 - [Getting started](web/docs/tutorials/getting-started.md)
 - [Configuration](web/docs/operator/configuration.md),
+  [eviction webhook](web/docs/operator/eviction-webhook.md),
   [admission policies](web/docs/operator/admission-policies.md) and
   [observability](web/docs/operator/observability.md): metrics, alerts,
   dashboard, logs, pprof
@@ -55,9 +61,10 @@ Go and controller-runtime; `make help` lists the targets.
 make test     # unit, fuzz-seed and envtest tests
 make lint     # golangci-lint, logging rules and the toolchain check
 make test-alerts  # promtool check and unit tests of the alerts (docker)
+make validate-packaging  # manifests, Helm chart, OLM bundle and catalog agree
 make build    # bin/nodeecho
 make e2e      # end-to-end on throwaway k3d clusters: 1.34, 1.36, 1.36 with
-              # PodTopologyLabelsAdmission off; needs docker, k3d, kubectl, jq
+              # PodTopologyLabelsAdmission off, cert-manager, Helm, OLM
 make scale    # memory, API requests and latency with thousands of pods on
               # fake Nodes, on a throwaway k3d cluster
 make deploy   # kustomize config/default into nodeecho-system

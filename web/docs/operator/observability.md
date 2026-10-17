@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 title: Observability
 ---
 
@@ -11,9 +11,20 @@ and `config/grafana` hold a ServiceMonitor, alerts and a dashboard.
 
 ## Metrics
 
-The metrics endpoint listens on `:8443`, over HTTPS, and lets in only
-clients that the API server authenticates and authorizes for `GET /metrics`:
-a ServiceAccount token bound to the `nodeecho-metrics-reader` ClusterRole.
+Two modes, chosen at install:
+
+| Mode | Port | Who may scrape |
+| --- | --- | --- |
+| secure (default) | `https-metrics`, 8443 | clients the API server authenticates and authorizes for `GET /metrics` |
+| plain | `http-metrics`, 8080 | anyone who reaches the pod |
+
+Plain HTTP is for a scraper that sends no token, such as a classic
+`kubernetes-pods` job. Choose it with `metrics.secure: false` in Helm, or the
+`config/components/metrics-http` component; the container port, the Service
+and the discovery annotations follow.
+
+In secure mode, the endpoint lets in a ServiceAccount token bound to the
+`nodeecho-metrics-reader` ClusterRole.
 
 ```bash
 kubectl create clusterrolebinding prometheus-reads-nodeecho \
@@ -22,8 +33,7 @@ kubectl create clusterrolebinding prometheus-reads-nodeecho \
 
 The certificate is self-signed unless `--metrics-cert-dir` points at a
 directory holding `tls.crt` and `tls.key`, for instance a cert-manager
-Secret mounted in the pod. `--metrics-secure=false` serves plain HTTP
-without authentication instead.
+Secret mounted in the pod (`metrics.certSecret` in Helm).
 
 Every metric is listed in [Metrics and Events](../reference/metrics-and-events.md).
 
@@ -42,7 +52,40 @@ installs:
   it for another Prometheus.
 
 The alerts aggregate gauges with `max()`: a standby replica runs no controller
-and reports zeros.
+and reports zeros. The Helm chart has the same with
+`metrics.serviceMonitor.enabled`, `metrics.prometheusRule.enabled` and
+`metrics.readers`.
+
+### Without the Prometheus Operator
+
+NodeEcho's pod can carry the annotations monitoring agents discover their
+targets by, after the conventions of the
+[CloudNativePG discovery annotations](https://github.com/fyannk/cloudnative-pg/pull/30).
+They are off by default; in Helm, `metrics.discovery` lists the families:
+
+| Family | Annotations | Read by |
+| --- | --- | --- |
+| `prometheus` | `prometheus.io/scrape`, `port`, `path`, `scheme` | a classic `kubernetes-pods` scrape job |
+| `opentelemetry` | the `io.opentelemetry.discovery.*` hints of the metrics port and of the `manager` container's logs | an OpenTelemetry Collector's `receiver_creator` with the `k8s_observer` |
+
+- Port and scheme follow the metrics mode. A classic Prometheus job sends no
+  token, so pair `prometheus` with `metrics.secure: false`.
+- With secure metrics, the OpenTelemetry hint scrapes over HTTPS, skips the
+  certificate check (it does not cover the pod IP), and sends the collector's
+  ServiceAccount token: bind the collector's ServiceAccount with
+  `metrics.readers`.
+- The logs hint parses the container log, then the JSON of each line.
+- The annotations are on the pod only, never on a Service, so nothing is
+  scraped twice.
+
+```yaml
+metrics:
+  secure: false
+  discovery: [prometheus, opentelemetry]
+```
+
+With kustomize, add the same annotations to the Deployment's pod template;
+`helm template` with these values prints them.
 
 ## Alerts
 

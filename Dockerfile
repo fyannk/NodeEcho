@@ -2,7 +2,9 @@
 #
 #   docker build -t nodeecho:latest .
 
-FROM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS builder
+# The builder runs on the build platform and cross-compiles for each target
+# (linux/amd64, linux/arm64 with buildx), without emulation.
+FROM --platform=$BUILDPLATFORM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS builder
 WORKDIR /workspace
 
 # Module files first for dependency caching.
@@ -13,7 +15,9 @@ COPY cmd cmd
 COPY internal internal
 
 ARG VERSION=development
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -ldflags "-X main.version=${VERSION}" \
     -o /workspace/nodeecho ./cmd/nodeecho
 

@@ -5,36 +5,91 @@ title: Installation
 
 # Installation
 
-NodeEcho installs with kustomize, from `config/` in the repository. There is
-no released image yet: build one with `make docker-build IMG=<your image>`,
-push it to a registry your cluster pulls from, and point the Deployment at
-it.
+Three install paths say the same thing, and `make validate-packaging` checks
+they keep doing so: kustomize manifests, a Helm chart, and an OLM bundle and
+catalog.
+
+| Path | Best for | Options |
+| --- | --- | --- |
+| Helm, `deploy/helm/nodeecho` | most clusters | everything in values: rules, metrics, webhook, policies, monitoring |
+| kustomize, `config/` | GitOps overlays | components for each option |
+| OLM, `deploy/olm` | OpenShift and OLM clusters | webhook certificate from OLM |
+
+Images are published for `linux/amd64` and `linux/arm64`:
+
+- `ghcr.io/fyannk/nodeecho:<version>`;
+- `ghcr.io/fyannk/nodeecho-bundle:<version>` and `ghcr.io/fyannk/nodeecho-catalog:<version>` for OLM;
+- the chart at `oci://ghcr.io/fyannk/charts/nodeecho`.
+
+No version is released yet: until then, build the image with
+`make docker-build IMG=<your image>`.
 
 ## Requirements
 
-- Kubernetes 1.30 or later for the admission policies
-  (`ValidatingAdmissionPolicy` is GA in 1.30). Tested on 1.34 and 1.36.
+- Kubernetes 1.30 or later; tested on 1.34 and 1.36.
 - Cluster-admin rights to install: NodeEcho needs a ClusterRole.
+- For the eviction webhook with `cert-manager` certificates: cert-manager.
+- For the ServiceMonitor and alerts: the Prometheus Operator.
 
-## Install
+## With Helm
 
 ```bash
-kubectl apply -k config/default
-kubectl -n nodeecho-system set image deployment/nodeecho manager=<your image>
-kubectl -n nodeecho-system rollout status deployment/nodeecho
+helm install nodeecho oci://ghcr.io/fyannk/charts/nodeecho \
+  --namespace nodeecho-system --create-namespace -f values.yaml
 ```
 
-Or, better, a kustomize overlay of your own that pins the image:
+A typical `values.yaml`:
+
+```yaml
+rules:
+  - name: cnpg-instances
+    podSelector: {matchLabels: {cnpg.io/podRole: instance}}
+    unschedulable: {}
+    taints: {copy: [node.kubernetes.io/unschedulable, karpenter.sh/disrupted]}
+    eviction: {}
+webhook:
+  enabled: true                 # the eviction webhook, certificate by NodeEcho
+policies:
+  reservedKeys: {enabled: true}
+  writerScope: {enabled: true}  # allowed keys computed from the rules
+metrics:
+  serviceMonitor: {enabled: true}
+  prometheusRule: {enabled: true}
+  readers: [{name: prometheus-k8s, namespace: monitoring}]
+dashboard: {enabled: true}
+```
+
+Every value is described in the chart's
+[`values.yaml`](https://github.com/fyannk/NodeEcho/blob/main/deploy/helm/nodeecho/values.yaml).
+The chart names its resources after the release; the admission policies name
+the release's own namespace and ServiceAccount.
+
+Rules set in values are written to the ConfigMap on each upgrade; to manage
+the rules elsewhere, leave `rules` empty and edit the ConfigMap, NodeEcho
+watches it either way.
+
+## With kustomize
 
 ```yaml
 resources:
   - github.com/fyannk/NodeEcho/config/default?ref=<commit>
   - github.com/fyannk/NodeEcho/config/policy?ref=<commit>
+components:
+  - github.com/fyannk/NodeEcho/config/components/eviction-webhook?ref=<commit>
 images:
   - name: nodeecho
-    newName: registry.example.org/nodeecho
-    newTag: <tag>
+    newName: ghcr.io/fyannk/nodeecho
+    newTag: <version>
 ```
+
+| Directory | Adds |
+| --- | --- |
+| `config/default` | NodeEcho in `nodeecho-system`, with its rules ConfigMap (`rules: []`) |
+| `config/policy` | the two [admission policies](admission-policies.md) |
+| `config/components/eviction-webhook` | the [eviction webhook](eviction-webhook.md), certificate by NodeEcho |
+| `config/components/cert-manager` | after the previous one: certificate by cert-manager |
+| `config/components/metrics-http` | plain HTTP metrics on 8080, see [Observability](observability.md) |
+| `config/prometheus`, `config/grafana` | ServiceMonitor, alerts, dashboard |
 
 `config/default` installs:
 
@@ -49,27 +104,44 @@ images:
 | ClusterRole `nodeecho-metrics-reader` | `GET /metrics`, to bind to your scraper |
 | ConfigMap `nodeecho` | the rules, `rules: []` to start with |
 
-Then install the [admission policies](admission-policies.md) from
-`config/policy`, after adding your rules' keys to them, and, with the
-Prometheus Operator, the [monitoring](observability.md) from
-`config/prometheus` and `config/grafana`.
+The admission policies name the ServiceAccount
+`system:serviceaccount:nodeecho-system:nodeecho`: installing elsewhere means
+editing them too. The Helm chart does it for you.
 
-## Namespace and names
+## With OLM
 
-The rules ConfigMap is read from NodeEcho's own namespace, given by the
-`POD_NAMESPACE` environment variable. Both admission policies name the
-ServiceAccount `system:serviceaccount:nodeecho-system:nodeecho`: installing
-elsewhere means editing them too.
+Add the catalog, then subscribe; NodeEcho installs in all-namespaces mode:
+
+```yaml
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata: {name: nodeecho, namespace: olm}          # openshift-marketplace on OpenShift
+spec:
+  sourceType: grpc
+  image: ghcr.io/fyannk/nodeecho-catalog:<version>
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata: {name: nodeecho, namespace: operators}    # openshift-operators on OpenShift
+spec:
+  channel: alpha
+  name: nodeecho
+  source: nodeecho
+  sourceNamespace: olm
+```
+
+The bundle installs NodeEcho, its rules ConfigMap `nodeecho` (empty), the
+metrics Service and reader role, and the eviction webhook, whose certificate
+OLM issues. Edit the ConfigMap to add rules. The admission policies and the
+monitoring are not part of the bundle: apply `config/policy` and
+`config/prometheus` beside it, adapting the ServiceAccount's namespace in the
+policies.
 
 ## High availability
 
 Leader election is on. A second replica waits on the Lease and takes over
 within seconds when the leader goes away; it reports ready while it waits,
-so that rolling updates complete. Scale with:
-
-```bash
-kubectl -n nodeecho-system scale deployment/nodeecho --replicas=2
-```
+so that rolling updates complete, and it answers the eviction webhook too.
 
 ## Upgrade
 
@@ -79,11 +151,7 @@ writes nothing.
 
 ## Uninstall
 
-```bash
-kubectl delete -k config/policy
-kubectl delete -k config/default
-```
-
 Uninstalling leaves the keys on the pods, as a stopped NodeEcho does. To
 remove them first, set `rules: []` and wait for NodeEcho to clean up, then
-uninstall.
+uninstall. With the `self` certificate provider, the Helm chart keeps the
+webhook's Secret (`helm.sh/resource-policy: keep`); delete it by hand.

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "nodeecho.fullname" . }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  selector:
+    {{- include "nodeecho.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: {{ include "nodeecho.metricsPortName" . }}
+      port: {{ include "nodeecho.metricsPort" . }}
+      targetPort: {{ include "nodeecho.metricsPortName" . }}

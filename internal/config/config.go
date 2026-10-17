@@ -38,6 +38,7 @@ const Version = 1
 const (
 	DefaultUnschedulableKey = "nodeecho.fyannk.dev/unschedulable"
 	DefaultTaintsKey        = "nodeecho.fyannk.dev/taints"
+	DefaultEvictionKey      = "nodeecho.fyannk.dev/eviction-requested"
 )
 
 // Target names the pod metadata map a key is written to.
@@ -67,6 +68,7 @@ type Rule struct {
 	Taints            *TaintsEcho           `json:"taints,omitempty"`
 	Labels            *LabelCopy            `json:"labels,omitempty"`
 	Annotations       *AnnotationCopy       `json:"annotations,omitempty"`
+	Eviction          *EvictionMark         `json:"eviction,omitempty"`
 }
 
 // UnschedulableEcho echoes Node.spec.unschedulable.
@@ -94,6 +96,21 @@ type AnnotationCopy struct {
 	Copy   []string `json:"copy"`
 	Target Target   `json:"target,omitempty"`
 	Prefix string   `json:"prefix,omitempty"`
+}
+
+// Responses of the eviction webhook.
+const (
+	EvictionAllow = "allow"
+	EvictionDeny  = "deny"
+)
+
+// EvictionMark records, when the eviction webhook is installed, the time
+// NodeEcho received the first eviction request for a selected pod, and
+// answers the request.
+type EvictionMark struct {
+	Key      string `json:"key,omitempty"`
+	Response string `json:"response,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 // RuleError reports a refused rule. The other rules keep running.
@@ -225,6 +242,17 @@ func (r *Rule) applyDefaults() {
 	if a := r.Annotations; a != nil && a.Target == "" {
 		a.Target = TargetAnnotations
 	}
+	if e := r.Eviction; e != nil {
+		if e.Key == "" {
+			e.Key = DefaultEvictionKey
+		}
+		if e.Response == "" {
+			e.Response = EvictionAllow
+		}
+		if e.Response == EvictionDeny && e.Message == "" {
+			e.Message = fmt.Sprintf("eviction refused by NodeEcho rule %s", r.Name)
+		}
+	}
 }
 
 // destination is a pod key a rule writes.
@@ -256,7 +284,21 @@ func (r *Rule) destinations() []destination {
 			out = append(out, destination{a.Target, a.Prefix + k, false})
 		}
 	}
+	if e := r.Eviction; e != nil {
+		out = append(out, destination{TargetAnnotations, e.Key, true})
+	}
 	return out
+}
+
+// AnnotationKeys returns the pod annotation keys the rule writes.
+func (r *Rule) AnnotationKeys() []string {
+	var keys []string
+	for _, d := range r.destinations() {
+		if d.Target == TargetAnnotations {
+			keys = append(keys, d.Key)
+		}
+	}
+	return keys
 }
 
 // EchoKeys returns the keys of the echoed Node spec fields, which must be
@@ -268,6 +310,9 @@ func (r *Rule) EchoKeys() []string {
 	}
 	if r.Taints != nil {
 		keys = append(keys, r.Taints.Key)
+	}
+	if r.Eviction != nil {
+		keys = append(keys, r.Eviction.Key)
 	}
 	return keys
 }
@@ -296,8 +341,8 @@ func (r *Rule) validate() error {
 		}
 	}
 
-	if r.Unschedulable == nil && r.Taints == nil && r.Labels == nil && r.Annotations == nil {
-		errs = append(errs, errors.New("rule echoes nothing: set unschedulable, taints, labels or annotations"))
+	if r.Unschedulable == nil && r.Taints == nil && r.Labels == nil && r.Annotations == nil && r.Eviction == nil {
+		errs = append(errs, errors.New("rule echoes nothing: set unschedulable, taints, labels, annotations or eviction"))
 	}
 
 	// Destination keys per pod metadata map, to detect collisions.
@@ -337,6 +382,16 @@ func (r *Rule) validate() error {
 		for _, k := range a.Copy {
 			errs = append(errs, checkKey("annotations destination", a.Prefix+k)...)
 			add(a.Target, a.Prefix+k, "annotation "+k)
+		}
+	}
+	if e := r.Eviction; e != nil {
+		errs = append(errs, checkKey("eviction.key", e.Key)...)
+		add(TargetAnnotations, e.Key, "eviction")
+		if e.Response != EvictionAllow && e.Response != EvictionDeny {
+			errs = append(errs, fmt.Errorf("eviction.response: %q is not %q or %q", e.Response, EvictionAllow, EvictionDeny))
+		}
+		if e.Response == EvictionAllow && e.Message != "" {
+			errs = append(errs, errors.New("eviction.message is only used with response: deny"))
 		}
 	}
 	return errors.Join(errs...)

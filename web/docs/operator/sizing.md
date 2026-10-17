@@ -1,32 +1,41 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 title: Sizing
 ---
 
 # Sizing
 
 NodeEcho caches every pod, Node and Namespace of the cluster, stripped to
-what it reads: names, labels, annotations, the pod's node name, the Node's
-cordon and taints, and its own field manager entries. Its memory grows with
-the number of pods in the cluster, selected or not.
+what it reads:
+
+- pods: name, labels, node name, NodeEcho's own field manager entries, and
+  only the annotations the rules write or NodeEcho owns;
+- Nodes: labels, annotations, cordon and taints;
+- Namespaces: labels.
+
+Its memory still grows with the number of pods in the cluster, selected or
+not, but no longer with their annotations, which are usually the biggest
+part of a pod object.
 
 ## Measured
 
-With `hack/scale.sh` (`make scale`): Kubernetes 1.36, fake Nodes, half of
-the pods selected by a rule.
+With `hack/scale.sh` (`make scale`): Kubernetes 1.36, 20,000 pods on 200
+fake Nodes, half of them selected by a rule, each pod carrying a 1 KiB
+annotation as tools and controllers leave on real pods.
 
-| Pods | Steady RSS | Peak RSS (rule change) | Cordon of every node echoed |
-| --- | --- | --- | --- |
-| 2,000 on 20 nodes | 45 MiB | 52 MiB | 4 s for 1,000 pods |
-| 20,000 on 200 nodes | 117 MiB | 162 MiB | 18 s for 10,000 pods |
+| | Steady | After cordon and taint | Peak, rule change | After a restart |
+| --- | --- | --- | --- | --- |
+| RSS | 131 MiB | 153 MiB | 186 MiB | 171 MiB |
+| Heap in use | 65 MiB | 105 MiB | 122 MiB | 83 MiB |
+
+Without the annotation filter, the same run needed 175 MiB at steady state
+(heap 130 MiB) and peaked at 224 MiB.
 
 - One write per pod that needs a change, and none for the others. A restart
   writes nothing.
+- Cordoning all 200 nodes at once reaches the 10,000 selected pods in 20 s;
+  one node with about 100 pods is echoed in about 0.2 s.
 - A rule change reconciles every pod: about 50 s at 20,000 pods.
-- One node with about 100 pods is echoed in about 0.2 s.
-
-The fake pods are small. Pods with many labels or large annotations take
-more memory: annotations are kept whole.
 
 ## Defaults
 

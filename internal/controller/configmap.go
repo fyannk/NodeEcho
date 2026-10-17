@@ -26,9 +26,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -49,6 +51,10 @@ type ConfigReconciler struct {
 	Store     *Store
 	// Resync receives one event per pod after a rule change.
 	Resync chan<- event.GenericEvent
+	// Elected is closed once this instance leads; nil means always. Every
+	// instance loads the rules, for the eviction webhook, but only the
+	// leader runs the pod projector, so only it resyncs the pods.
+	Elected <-chan struct{}
 }
 
 // Reconcile reads the ConfigMap. A missing ConfigMap, a missing key or an
@@ -101,6 +107,16 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 	if !changed {
 		return ctrl.Result{}, nil
 	}
+	if r.Elected != nil {
+		select {
+		case <-r.Elected:
+		default:
+			// A standby instance: the pod projector reconciles every pod when
+			// it starts, after the election.
+			logger.Info("Rules loaded", "active", len(r.Store.Rules()), "refused", len(refused))
+			return ctrl.Result{}, nil
+		}
+	}
 	pods := &corev1.PodList{}
 	if err := r.List(ctx, pods); err != nil {
 		return ctrl.Result{}, err
@@ -128,6 +144,7 @@ func (r *ConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}}}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("rules").
+		WithOptions(controller.Options{NeedLeaderElection: ptr.To(false)}).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(isRulesConfigMap)).
 		WatchesRawSource(source.Channel(start, &handler.EnqueueRequestForObject{})).
 		Complete(r)

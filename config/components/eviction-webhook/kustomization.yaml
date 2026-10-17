@@ -1,0 +1,31 @@
+# The optional eviction webhook, with NodeEcho generating and rotating its own
+# certificate. Add it to an overlay, with config/components/cert-manager
+# after it to use cert-manager instead.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - service.yaml
+  - webhook.yaml
+  - secret.yaml
+  - rbac.yaml
+patches:
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --webhook-port=9443
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --cert-rotation
+      - op: add
+        path: /spec/template/spec/containers/0/ports/-
+        value: {name: webhook, containerPort: 9443}
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - {name: webhook-cert, mountPath: /tmp/k8s-webhook-server/serving-certs, readOnly: true}
+      - op: add
+        path: /spec/template/spec/volumes
+        value:
+          - name: webhook-cert
+            secret: {secretName: nodeecho-webhook-cert}

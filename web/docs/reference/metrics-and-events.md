@@ -21,6 +21,7 @@ standard controller-runtime, client-go and Go runtime metrics.
 | `nodeecho_rules_refused` | gauge | | rules refused in the last read configuration |
 | `nodeecho_keys_skipped_total` | counter | `rule`, `reason` | configured keys not written on a pod |
 | `nodeecho_pod_writes_total` | counter | `rule`, `result` | server-side apply requests sent to pods |
+| `nodeecho_evictions_total` | counter | `rule`, `response` | eviction requests for pods a rule with an `eviction` block selects; `response` is `allow` or `deny` |
 
 `reason` is one of:
 
@@ -53,11 +54,14 @@ Warning Events on the pod, from `nodeecho`, through the `events.k8s.io` API:
 | --- | --- |
 | `KeySkipped` | `rule <name>: key <key> not written: <why>`, or `rule <name>: write rejected: <API error>` |
 | `KubernetesTopologyMissing` | `rule <name>: label <key> is on node <node> but not on the pod; Kubernetes did not copy it, set labels.forceKubernetesManaged to copy it` |
+| `EvictionRequested` (Normal) | `rule <name>: eviction request received` |
+| `EvictionRefused` | `rule <name>: eviction request refused: <message>` |
 
 ## Probes
 
 On `:8081`:
 
 - `/healthz`: the process is alive.
-- `/readyz`: on the elected instance, a valid configuration is loaded; a
-  standby instance is always ready.
+- `/readyz`: with the eviction webhook, every instance once it serves it;
+  besides, the elected instance once a valid configuration is loaded. A
+  standby instance does not wait for a configuration.

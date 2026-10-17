@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# Restrictive at the top; the one job that publishes asks for the scope.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Package the Helm chart and create the release
+    permissions:
+      contents: write # create the release
+      packages: write # push the chart to ghcr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+
+      - name: The tag is the packaged version
+        run: |
+          version=$(sed -n 's/^version: //p' deploy/helm/nodeecho/Chart.yaml)
+          [ "v${version}" = "${GITHUB_REF_NAME}" ] || {
+            echo "::error::tag ${GITHUB_REF_NAME} but the chart is ${version}"; exit 1; }
+          ./hack/validate-packaging.sh
+
+      - run: helm package deploy/helm/nodeecho -d dist
+
+      # An OCI artifact next to the images: no repository index to host,
+      # and Argo and Flux both read it.
+      - name: Push the chart
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
+          helm push dist/nodeecho-*.tgz "oci://ghcr.io/${OWNER}/charts"
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          files: dist/*.tgz
+          generate_release_notes: true

@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: nodeecho-selfsigned
+  namespace: nodeecho-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: nodeecho-webhook
+  namespace: nodeecho-system
+spec:
+  secretName: nodeecho-webhook-cert
+  issuerRef:
+    name: nodeecho-selfsigned
+    kind: Issuer
+  dnsNames:
+    - nodeecho-webhook.nodeecho-system.svc
+    - nodeecho-webhook.nodeecho-system.svc.cluster.local

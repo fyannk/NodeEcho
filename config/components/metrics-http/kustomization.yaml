@@ -1,0 +1,19 @@
+# Plain HTTP metrics on port 8080, without TLS nor authentication, for a
+# scraper that sends no token, such as a classic prometheus.io/scrape job.
+# Add it to an overlay:  components: [<path to>/config/components/metrics-http]
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --metrics-secure=false
+      - op: replace
+        path: /spec/template/spec/containers/0/ports/0
+        value: {name: http-metrics, containerPort: 8080}
+  - target: {kind: Service, name: nodeecho-metrics}
+    patch: |-
+      - op: replace
+        path: /spec/ports/0
+        value: {name: http-metrics, port: 8080, targetPort: http-metrics}

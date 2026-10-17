@@ -90,9 +90,10 @@ func run(m *testing.M, cfg *rest.Config) int {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	store = &Store{}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Metrics: metricsserver.Options{BindAddress: "0"},
-		Cache:   cache.Options{ByObject: CacheOptions()},
+		Cache:   cache.Options{ByObject: CacheOptions(store)},
 	})
 	if err != nil {
 		panic(err)
@@ -100,7 +101,6 @@ func run(m *testing.M, cfg *rest.Config) int {
 	if copiesTopology, err = KubernetesCopiesTopology(cfg); err != nil {
 		panic(err)
 	}
-	store = &Store{}
 	resync := make(chan event.GenericEvent)
 	if err := (&ConfigReconciler{
 		Client: mgr.GetClient(), ConfigMap: types.NamespacedName{Namespace: configNS, Name: configName},

@@ -1,0 +1,28 @@
+# NodeEcho records when it first receives an eviction request for a pod a
+# rule with an eviction block selects, and answers it as the rule says.
+# failurePolicy Ignore: NodeEcho being down never blocks an eviction.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: nodeecho-eviction
+  labels:
+    app.kubernetes.io/name: nodeecho
+webhooks:
+  - name: evictions.nodeecho.fyannk.dev
+    admissionReviewVersions: [v1]
+    clientConfig:
+      service:
+        name: nodeecho-webhook
+        namespace: nodeecho-system
+        path: /evictions
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods/eviction]
+        scope: Namespaced
+    failurePolicy: Ignore
+    matchPolicy: Equivalent
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: 5

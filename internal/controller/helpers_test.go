@@ -262,7 +262,8 @@ func TestStripKeepsWhatNodeEchoReads(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "p", Namespace: "n", UID: "u", ResourceVersion: "7", DeletionTimestamp: &now,
-			Labels: map[string]string{"a": "1"}, Annotations: map[string]string{"b": "2"},
+			Labels:          map[string]string{"a": "1"},
+			Annotations:     map[string]string{"b": "2", "kubectl.kubernetes.io/last-applied-configuration": "{...}"},
 			OwnerReferences: []metav1.OwnerReference{{Name: "rs"}},
 			ManagedFields: []metav1.ManagedFieldsEntry{
 				managed("nodeecho/db", "Apply", `{"f:metadata":{"f:labels":{"f:a":{}}}}`),
@@ -272,10 +273,10 @@ func TestStripKeepsWhatNodeEchoReads(t *testing.T) {
 		Spec:   corev1.PodSpec{NodeName: "node", Containers: []corev1.Container{{Name: "c", Image: "i"}}},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
-	got, _ := stripPod(pod)
+	got, _ := stripPod(pod, map[string]bool{"b": true, "absent": true})
 	p := got.(*corev1.Pod)
 	if p.Name != "p" || p.Namespace != "n" || p.UID != "u" || p.ResourceVersion != "7" || p.DeletionTimestamp == nil ||
-		!maps.Equal(p.Labels, pod.Labels) || !maps.Equal(p.Annotations, pod.Annotations) || p.Spec.NodeName != "node" {
+		!maps.Equal(p.Labels, pod.Labels) || !maps.Equal(p.Annotations, map[string]string{"b": "2"}) || p.Spec.NodeName != "node" {
 		t.Errorf("stripped pod lost a field NodeEcho reads: %+v", p)
 	}
 	if len(p.Spec.Containers) != 0 || p.Status.Phase != "" || len(p.OwnerReferences) != 0 {
@@ -286,6 +287,22 @@ func TestStripKeepsWhatNodeEchoReads(t *testing.T) {
 	}
 	if labels, _ := ownedKeys(p, "nodeecho/db"); !labels["a"] {
 		t.Error("owned keys lost after stripping")
+	}
+	if got, _ := stripPod(pod, nil); got.(*corev1.Pod).Annotations != nil {
+		t.Errorf("no rule writes annotations: annotations = %v, want none", got.(*corev1.Pod).Annotations)
+	}
+
+	// Before the rules load, the annotations NodeEcho wrote stay: it must
+	// see them to write nothing on a restart.
+	own := pod.DeepCopy()
+	own.Annotations["nodeecho.fyannk.dev/taints"] = "[]"
+	own.Annotations["x.io/evicted"] = "2026-10-16T09:30:00Z"
+	own.ManagedFields = append(own.ManagedFields,
+		managed("nodeecho/db", "Apply", `{"f:metadata":{"f:annotations":{"f:nodeecho.fyannk.dev/taints":{}}}}`),
+		managed("nodeecho-eviction/db", "Apply", `{"f:metadata":{"f:annotations":{"f:x.io/evicted":{}}}}`))
+	got, _ = stripPod(own, nil)
+	if want := map[string]string{"nodeecho.fyannk.dev/taints": "[]", "x.io/evicted": "2026-10-16T09:30:00Z"}; !maps.Equal(got.(*corev1.Pod).Annotations, want) {
+		t.Errorf("own annotations = %v, want %v", got.(*corev1.Pod).Annotations, want)
 	}
 
 	node := &corev1.Node{
@@ -310,7 +327,7 @@ func TestStripKeepsWhatNodeEchoReads(t *testing.T) {
 
 	// Tombstones and other objects pass through.
 	tomb := toolscache.DeletedFinalStateUnknown{Key: "n/p"}
-	for _, f := range []toolscache.TransformFunc{stripPod, stripNode, stripNamespace} {
+	for _, f := range []toolscache.TransformFunc{podStripper(&Store{}), stripNode, stripNamespace} {
 		if out, _ := f(tomb); out != tomb {
 			t.Errorf("tombstone changed: %v", out)
 		}
@@ -340,5 +357,24 @@ func TestPodGone(t *testing.T) {
 	})
 	if !podGone(invalidUID) {
 		t.Error("an Invalid metadata.uid means the pod was replaced")
+	}
+}
+
+func TestStoreAnnotationKeys(t *testing.T) {
+	s := &Store{}
+	if s.AnnotationKeys() != nil {
+		t.Fatal("no keys before the first load")
+	}
+	valid, refused := rulesOf(t, `- name: a
+  podSelector: {matchLabels: {app: a}}
+  unschedulable: {key: x.io/u}
+  taints: {copy: [t]}
+  labels: {copy: [zone], target: annotations, prefix: node.}
+  annotations: {copy: [rack.io/pos, rack.io/row], target: labels}
+`)
+	_, _, _ = s.Set(valid, refused)
+	want := map[string]bool{config.DefaultTaintsKey: true, "node.zone": true}
+	if got := s.AnnotationKeys(); !maps.Equal(got, want) {
+		t.Errorf("annotation keys = %v, want %v", got, want)
 	}
 }

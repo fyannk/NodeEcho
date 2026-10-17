@@ -512,3 +512,25 @@ func TestWriteToADeletedPodIsNotAnError(t *testing.T) {
 		t.Fatalf("writing to a deleted pod: %v", err)
 	}
 }
+
+// The pod is cached while no rule writes the annotation, so its cache entry
+// lacks it; a rule then starts writing that key. The foreign value must be
+// kept, through the apply conflict.
+func TestAnnotationOutsideTheCacheFilterIsStillProtected(t *testing.T) {
+	const pos = "rack.example.org/position"
+	setRules(t, cordonRule)
+	f := newFixture(t, map[string]string{"app": "x"}, nil)
+	f.updateNode(t, func(n *corev1.Node) { n.Annotations = map[string]string{pos: "row-1"} })
+	must(k8s.Create(context.Background(), newPod(f.ns, "held", f.node.Name, map[string]string{"app": "db"},
+		map[string]string{pos: "from-template"})))
+	eventually(t, "pod reconciled", func() bool { return len(managers(getPod(t, f.ns, "held"))) == 0 })
+
+	setRules(t, `- name: positions
+  podSelector: {matchLabels: {app: db}}
+  annotations: {copy: [rack.example.org/position]}
+`)
+	eventually(t, "KeySkipped event", func() bool { return hasEvent(f.ns, "held", ReasonKeySkipped) })
+	consistently(t, "foreign value kept", func() bool {
+		return getPod(t, f.ns, "held").Annotations[pos] == "from-template"
+	})
+}

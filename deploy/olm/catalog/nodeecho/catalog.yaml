@@ -1,0 +1,23 @@
+---
+schema: olm.package
+name: nodeecho
+defaultChannel: alpha
+description: >-
+  NodeEcho echoes Node facts (cordon, taints, labels, annotations) onto the
+  pods running there, so namespace-scoped operators need no access to Nodes.
+---
+schema: olm.channel
+package: nodeecho
+name: alpha
+entries:
+  - name: nodeecho.v0.1.0
+---
+schema: olm.bundle
+package: nodeecho
+name: nodeecho.v0.1.0
+image: ghcr.io/fyannk/nodeecho-bundle:0.1.0
+properties:
+  - type: olm.package
+    value:
+      packageName: nodeecho
+      version: 0.1.0

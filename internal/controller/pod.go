@@ -263,9 +263,15 @@ func upToDate(want, current map[string]string, owned map[string]bool) bool {
 // ownedKeys returns the label and annotation keys a field manager owns on the
 // pod, from its managedFields entry.
 func ownedKeys(pod *corev1.Pod, manager string) (labelKeys, annotationKeys map[string]bool) {
+	return ownedKeysOf(pod, func(m string) bool { return m == manager })
+}
+
+// ownedKeysOf returns the label and annotation keys owned by the apply
+// field managers that match.
+func ownedKeysOf(pod *corev1.Pod, match func(manager string) bool) (labelKeys, annotationKeys map[string]bool) {
 	labelKeys, annotationKeys = map[string]bool{}, map[string]bool{}
 	for _, m := range pod.ManagedFields {
-		if m.Manager != manager || m.Operation != "Apply" || m.FieldsV1 == nil {
+		if !match(m.Manager) || m.Operation != "Apply" || m.FieldsV1 == nil {
 			continue
 		}
 		var fields struct {

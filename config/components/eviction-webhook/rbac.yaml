@@ -1,0 +1,54 @@
+# The certificate rotation: the Secret, in NodeEcho's namespace only, and the
+# CA bundle of its own webhook configuration.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nodeecho-cert-rotation
+  namespace: nodeecho-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [nodeecho-webhook-cert]
+    verbs: [update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nodeecho-cert-rotation
+  namespace: nodeecho-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nodeecho-cert-rotation
+subjects:
+  - kind: ServiceAccount
+    name: nodeecho
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nodeecho-cert-rotation
+rules:
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    verbs: [get, list, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [validatingwebhookconfigurations]
+    resourceNames: [nodeecho-eviction]
+    verbs: [update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nodeecho-cert-rotation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nodeecho-cert-rotation
+subjects:
+  - kind: ServiceAccount
+    name: nodeecho
+    namespace: nodeecho-system

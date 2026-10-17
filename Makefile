@@ -32,6 +32,10 @@ ENVTEST = go run sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.25
 test: fmt vet ## Run unit and envtest tests.
 	KUBEBUILDER_ASSETS="$$($(MAKE) -s envtest-assets)" go test ./... -coverprofile cover.out
 
+.PHONY: validate-packaging
+validate-packaging: ## Check that the manifests, the Helm chart, the OLM bundle and catalog agree.
+	./hack/validate-packaging.sh
+
 .PHONY: test-alerts
 test-alerts: ## Check and unit-test the Prometheus alerts with promtool (needs docker).
 	./hack/test-alerts.sh
@@ -79,6 +83,19 @@ deploy: ## Deploy NodeEcho into the nodeecho-system namespace.
 .PHONY: undeploy
 undeploy: ## Remove the NodeEcho deployment.
 	kubectl delete -k config/default
+
+.PHONY: helm-package
+helm-package: ## Package the Helm chart into dist/.
+	mkdir -p dist
+	helm package deploy/helm/nodeecho -d dist
+
+.PHONY: bundle-build
+bundle-build: ## Build the OLM bundle image.
+	docker build -f deploy/olm/bundle.Dockerfile -t nodeecho-bundle:$(VERSION) deploy/olm/bundle
+
+.PHONY: catalog-build
+catalog-build: ## Build the OLM catalog image.
+	docker build -f deploy/olm/catalog.Dockerfile -t nodeecho-catalog:$(VERSION) deploy/olm/catalog
 
 .PHONY: deploy-policy
 deploy-policy: ## Install the optional admission policies (reserved keys, NodeEcho writer scope).

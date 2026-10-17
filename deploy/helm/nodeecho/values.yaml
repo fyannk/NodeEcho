@@ -1,0 +1,124 @@
+# Default values for nodeecho. See https://fyannk.github.io/NodeEcho/
+
+# nameOverride replaces the chart name in resource names.
+nameOverride: ""
+# fullnameOverride replaces the fully-qualified app name in resource names.
+fullnameOverride: ""
+
+# replicaCount is the number of NodeEcho replicas. One leads; the others wait
+# on the lease and, with the eviction webhook, answer it too.
+replicaCount: 1
+
+# image is NodeEcho's image. An empty tag means the chart's appVersion.
+image:
+  repository: ghcr.io/fyannk/nodeecho
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# rules are what NodeEcho echoes, the `rules` of the rules ConfigMap, see
+# https://fyannk.github.io/NodeEcho/docs/operator/configuration/ . Empty:
+# NodeEcho runs and writes nothing.
+rules: []
+# - name: cnpg-instances
+#   podSelector: {matchLabels: {cnpg.io/podRole: instance}}
+#   unschedulable: {}
+#   taints: {copy: [node.kubernetes.io/unschedulable, karpenter.sh/disrupted]}
+#   eviction: {}
+
+# logLevel is info, error, or a number for more detail (1, 2).
+logLevel: info
+
+metrics:
+  # secure serves HTTPS on 8443, to clients the API server authenticates and
+  # authorizes for GET /metrics (bind them to the <fullname>-metrics-reader
+  # ClusterRole). false serves plain HTTP on 8080, without authentication,
+  # for scrapers that send no token, such as a classic prometheus.io job.
+  secure: true
+  # port overrides 8443 (secure) or 8080 (plain).
+  port: 0
+  # certSecret names a Secret holding tls.crt and tls.key for the metrics
+  # endpoint, mounted in the pod; a self-signed certificate otherwise.
+  certSecret: ""
+  # discovery adds annotations on the pod telling agents how to collect
+  # NodeEcho's metrics and logs: prometheus (prometheus.io/*), opentelemetry
+  # (io.opentelemetry.discovery.* hints of the collector's receiver_creator).
+  discovery: []
+  serviceMonitor:
+    # enabled creates a ServiceMonitor (needs the Prometheus Operator).
+    enabled: false
+    labels: {}
+    interval: ""
+  prometheusRule:
+    # enabled creates the PrometheusRule with NodeEcho's alerts.
+    enabled: false
+    labels: {}
+  # readers are ServiceAccounts bound to the metrics reader ClusterRole, for
+  # secure metrics: Prometheus's, an OpenTelemetry Collector's.
+  readers: []
+  # - {name: prometheus-k8s, namespace: monitoring}
+
+dashboard:
+  # enabled creates the Grafana dashboard as a ConfigMap, labelled for the
+  # dashboard sidecar of kube-prometheus-stack or the Grafana chart.
+  enabled: false
+  labels:
+    grafana_dashboard: "1"
+  # namespace of the ConfigMap; the release namespace when empty.
+  namespace: ""
+
+webhook:
+  # enabled serves the eviction webhook: for pods selected by a rule with an
+  # eviction block, NodeEcho records when it first received an eviction
+  # request and answers it as the rule says.
+  enabled: false
+  port: 9443
+  # failurePolicy Ignore never blocks an eviction while NodeEcho is down.
+  failurePolicy: Ignore
+  timeoutSeconds: 5
+  # namespaceSelector narrows the namespaces whose evictions are sent.
+  namespaceSelector: {}
+  certificates:
+    # provider is self (NodeEcho generates and rotates the certificate) or
+    # cert-manager (a self-signed Issuer and a Certificate; needs
+    # cert-manager).
+    provider: self
+
+policies:
+  # reservedKeys rejects changes to NodeEcho's keys by anyone but NodeEcho.
+  reservedKeys:
+    enabled: false
+    # extraPrefixes are more key prefixes to reserve, ending in "/".
+    extraPrefixes: []
+  # writerScope limits NodeEcho to updating the pod labels and annotations
+  # its rules write. The allowed list is computed from the rules.
+  writerScope:
+    enabled: false
+    # extraAllowed are more keys, or prefixes ending in "/", NodeEcho may
+    # change, for rules managed outside this chart.
+    extraAllowed: []
+
+# pprof serves Go's profiles on this address, for instance 127.0.0.1:6060;
+# empty disables it. Unauthenticated: keep it on 127.0.0.1.
+pprofAddress: ""
+
+# extraArgs are appended to NodeEcho's command line.
+extraArgs: []
+
+# goMemLimit is the Go runtime's soft memory limit; keep it at about 90% of
+# resources.limits.memory.
+goMemLimit: 450MiB
+
+# resources: about 120 MiB at 20,000 pods, 160 MiB while a rule change
+# resyncs them all (hack/scale.sh). Memory grows with the pods of the
+# cluster, selected or not.
+resources:
+  requests: {cpu: 10m, memory: 128Mi}
+  limits: {memory: 512Mi}
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""

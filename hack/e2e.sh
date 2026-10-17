@@ -8,6 +8,13 @@
 #   k8s-1.36  Kubernetes copies zone and region at binding; NodeEcho leaves them.
 #   gate-off  1.36 with PodTopologyLabelsAdmission off: NodeEcho warns, and
 #             copies them once the rule sets forceKubernetesManaged.
+#   cert-manager  1.36, with the webhook certificate from cert-manager rather
+#             than NodeEcho's own rotation.
+#   helm      1.36, installed with the Helm chart.
+#   olm       1.36, installed by OLM from the bundle and the catalog, served by
+#             a local registry; OLM provides the webhook certificate. OLM
+#             reverts manual scaling and restarts of its Deployment, so the
+#             scenarios that do them are skipped.
 #
 # Every cluster gets its own kubeconfig in a temporary directory; the default
 # kubeconfig is never read nor written. Clusters are deleted at the end unless
@@ -28,7 +35,11 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-VARIANTS=${E2E_VARIANTS:-"k8s-1.34 k8s-1.36 gate-off"}
+VARIANTS=${E2E_VARIANTS:-"k8s-1.34 k8s-1.36 gate-off cert-manager helm olm"}
+OLM_VERSION=${E2E_OLM:-v0.46.0}
+REGISTRY_PORT=${E2E_REGISTRY_PORT:-5112}
+INSTALL=kustomize
+CERT_MANAGER=${E2E_CERT_MANAGER:-v1.21.2}
 K3S_OLD=${E2E_K3S_OLD:-rancher/k3s:v1.34.12-k3s1}
 K3S_NEW=${E2E_K3S_NEW:-rancher/k3s:v1.36.5-k3s1}
 BULK=${E2E_BULK:-120}
@@ -167,7 +178,24 @@ forward() {
 http_code() { curl -sk -o /dev/null -w '%{http_code}' "$1://127.0.0.1:$LOCAL$2" "${@:3}"; }
 http_body() { curl -skf "$1://127.0.0.1:$LOCAL$2" "${@:3}"; }
 metrics() { forward 8443 http_body https /metrics -H "Authorization: Bearer $SCRAPER_TOKEN"; }
-metric_is() { metrics | grep -qx "$1 $2"; }
+# Output is captured before grep: with pipefail, `cmd | grep -q` fails when
+# grep exits at the first match while cmd is still writing (SIGPIPE).
+metric_is() {
+	local m
+	m=$(metrics) || return 1
+	grep -qx "$1 $2" <<<"$m"
+}
+# metric_line <regexp>: a line of the metrics matches.
+metric_line() {
+	local m
+	m=$(metrics) || return 1
+	grep -q "$1" <<<"$m"
+}
+pod_writes_are() {
+	local m
+	m=$(metrics) || return 1
+	[[ $(awk '/^nodeecho_pod_writes_total/ {s += $NF} END {print s + 0}' <<<"$m") == "$1" ]]
+}
 
 policy_checked() { k get validatingadmissionpolicy "$1" -o json | jq -e '.status.typeChecking != null' >/dev/null; }
 
@@ -224,6 +252,7 @@ rules:
     copy: [topology.kubernetes.io/zone, topology.kubernetes.io/region, rack.example.org/id]
     forceKubernetesManaged: ${1:-false}
   annotations: {copy: [rack.example.org/position]}
+  eviction: {}
 - name: zone-annotation
   podSelector: {matchLabels: {app: e2e-db}}
   labels: {copy: [topology.kubernetes.io/zone], target: annotations}
@@ -248,7 +277,7 @@ create_cluster() {
 	# Behind a proxy, the nodes need it to pull the k3s system images.
 	local https=${HTTPS_PROXY:-${https_proxy:-}} http=${HTTP_PROXY:-${http_proxy:-}}
 	if [[ -n $https || -n $http ]]; then
-		local no="${NO_PROXY:-${no_proxy:-}},10.42.0.0/16,10.43.0.0/16,.svc,.cluster.local,localhost,127.0.0.1"
+		local no="${NO_PROXY:-${no_proxy:-}},10.42.0.0/16,10.43.0.0/16,.svc,.cluster.local,localhost,127.0.0.1,nodeecho-e2e-registry"
 		[[ -n $https ]] && extra+=(--env "HTTPS_PROXY=$https@server:*;agent:*")
 		[[ -n $http ]] && extra+=(--env "HTTP_PROXY=$http@server:*;agent:*")
 		extra+=(--env "NO_PROXY=${no#,}@server:*;agent:*")
@@ -271,29 +300,24 @@ create_cluster() {
 	done
 }
 
+install_cert_manager() {
+	curl -fsSL -o "$WORK/cert-manager.yaml" \
+		"https://github.com/cert-manager/cert-manager/releases/download/$CERT_MANAGER/cert-manager.yaml"
+	k apply -f "$WORK/cert-manager.yaml" >/dev/null
+	for d in cert-manager cert-manager-cainjector cert-manager-webhook; do
+		TIMEOUT=300 wait_for "$d ready" k rollout status -n cert-manager "deployment/$d" --timeout=5s
+	done
+}
+
+# The keys the e2e rules write, for the writer-scope policy.
+E2E_ALLOWED="['nodeecho.fyannk.dev/', 'topology.kubernetes.io/zone', 'topology.kubernetes.io/region', 'rack.example.org/', 'e2e.example.org/']"
+
 deploy() {
-	local overlay=$WORK/overlay
-	mkdir -p "$overlay"
-	cat >"$overlay/kustomization.yaml" <<EOF
-resources:
-  - $(realpath --relative-to="$overlay" "$ROOT")/config/default
-  - $(realpath --relative-to="$overlay" "$ROOT")/config/policy
-images:
-  - name: nodeecho
-    newTag: e2e
-patches:
-  - target: {kind: ValidatingAdmissionPolicy, name: nodeecho-writer-scope}
-    patch: |-
-      - op: replace
-        path: /spec/variables/0/expression
-        value: "['nodeecho.fyannk.dev/', 'topology.kubernetes.io/zone', 'topology.kubernetes.io/region', 'rack.example.org/', 'e2e.example.org/']"
-  - target: {kind: Deployment, name: nodeecho}
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --pprof-bind-address=127.0.0.1:6060
-EOF
-	k apply -k "$overlay" >/dev/null
+	case $INSTALL in
+	kustomize) deploy_kustomize ;;
+	helm) deploy_helm ;;
+	olm) deploy_olm ;;
+	esac
 	local warnings
 	for p in nodeecho-reserved-keys nodeecho-writer-scope; do
 		TIMEOUT=30 wait_for "policy $p type-checked" policy_checked "$p"
@@ -301,7 +325,7 @@ EOF
 		[[ -z $warnings ]] || fail "policy $p warnings: $warnings"
 	done
 	ok "policies compile without warnings"
-	TIMEOUT=120 wait_for "NodeEcho rolled out" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
+	TIMEOUT=180 wait_for "NodeEcho rolled out ($INSTALL)" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
 
 	# A scraper allowed to read the metrics, and one that is not.
 	k create serviceaccount -n "$SYS" metrics-scraper >/dev/null
@@ -310,6 +334,114 @@ EOF
 		--serviceaccount="$SYS:metrics-scraper" >/dev/null
 	SCRAPER_TOKEN=$(k create token -n "$SYS" metrics-scraper --duration=2h)
 	NOBODY_TOKEN=$(k create token -n "$SYS" nobody --duration=2h)
+}
+
+deploy_helm() {
+	cat >"$WORK/values.yaml" <<EOF
+fullnameOverride: nodeecho
+image: {repository: nodeecho, tag: e2e, pullPolicy: IfNotPresent}
+webhook: {enabled: true}
+pprofAddress: 127.0.0.1:6060
+policies:
+  reservedKeys: {enabled: true}
+  writerScope: {enabled: true, extraAllowed: $E2E_ALLOWED}
+EOF
+	helm --kubeconfig "$KCFG" install nodeecho "$ROOT/deploy/helm/nodeecho" -n "$SYS" --create-namespace \
+		-f "$WORK/values.yaml" >/dev/null
+	ok "installed with the Helm chart"
+}
+
+# deploy_olm builds the bundle and the catalog with the e2e image, pushes
+# them to the cluster's registry, and subscribes to NodeEcho through OLM.
+deploy_olm() {
+	local reg=localhost:$REGISTRY_PORT incluster=nodeecho-e2e-registry:$REGISTRY_PORT
+	KUBECONFIG=$KCFG operator-sdk olm install --version "$OLM_VERSION" --timeout 5m >/dev/null 2>&1 ||
+		fail "OLM $OLM_VERSION did not install"
+	ok "OLM $OLM_VERSION installed"
+
+	local olm=$WORK/olm
+	cp -r "$ROOT/deploy/olm" "$olm"
+	sed -i "s|ghcr.io/fyannk/nodeecho:[0-9.]*|$incluster/nodeecho:e2e|" "$olm/bundle/manifests/nodeecho.clusterserviceversion.yaml"
+	sed -i "s|ghcr.io/fyannk/nodeecho-bundle:[0-9.]*|$incluster/nodeecho-bundle:e2e|" "$olm/catalog/nodeecho/catalog.yaml"
+	docker tag "$IMG" "$reg/nodeecho:e2e"
+	docker build -q -f "$olm/bundle.Dockerfile" -t "$reg/nodeecho-bundle:e2e" "$olm/bundle" >/dev/null
+	docker build -q -f "$olm/catalog.Dockerfile" -t "$reg/nodeecho-catalog:e2e" "$olm/catalog" >/dev/null
+	for i in nodeecho nodeecho-bundle nodeecho-catalog; do docker push -q "$reg/$i:e2e" >/dev/null; done
+	ok "bundle and catalog pushed to the cluster's registry"
+
+	k create namespace "$SYS" >/dev/null
+	k apply -f - >/dev/null <<EOF
+apiVersion: operators.coreos.com/v1alpha1
+kind: CatalogSource
+metadata: {name: nodeecho, namespace: olm}
+spec:
+  sourceType: grpc
+  image: $incluster/nodeecho-catalog:e2e
+  displayName: NodeEcho e2e
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata: {name: nodeecho, namespace: $SYS}
+spec: {}
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata: {name: nodeecho, namespace: $SYS}
+spec:
+  channel: alpha
+  name: nodeecho
+  source: nodeecho
+  sourceNamespace: olm
+EOF
+	TIMEOUT=300 wait_for "the CSV succeeds" csv_succeeded
+	deploy_policies
+}
+
+csv_succeeded() { [[ $(k get csv -n "$SYS" -o jsonpath='{.items[0].status.phase}') == Succeeded ]]; }
+
+# deploy_policies installs config/policy alone, with the e2e keys allowed.
+deploy_policies() {
+	local overlay=$WORK/policies
+	mkdir -p "$overlay"
+	cat >"$overlay/kustomization.yaml" <<EOF
+resources:
+  - $(realpath --relative-to="$overlay" "$ROOT")/config/policy
+patches:
+  - target: {kind: ValidatingAdmissionPolicy, name: nodeecho-writer-scope}
+    patch: |-
+      - op: replace
+        path: /spec/variables/0/expression
+        value: "$E2E_ALLOWED"
+EOF
+	k apply -k "$overlay" >/dev/null
+}
+
+deploy_kustomize() {
+	local overlay=$WORK/overlay
+	mkdir -p "$overlay"
+	cat >"$overlay/kustomization.yaml" <<EOF
+resources:
+  - $(realpath --relative-to="$overlay" "$ROOT")/config/default
+  - $(realpath --relative-to="$overlay" "$ROOT")/config/policy
+components:
+  - $(realpath --relative-to="$overlay" "$ROOT")/config/components/eviction-webhook
+$(for c in ${EXTRA_COMPONENTS:-}; do echo "  - $(realpath --relative-to="$overlay" "$ROOT")/config/components/$c"; done)
+images:
+  - name: nodeecho
+    newTag: e2e
+patches:
+  - target: {kind: ValidatingAdmissionPolicy, name: nodeecho-writer-scope}
+    patch: |-
+      - op: replace
+        path: /spec/variables/0/expression
+        value: "$E2E_ALLOWED"
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --pprof-bind-address=127.0.0.1:6060
+EOF
+	k apply -k "$overlay" >/dev/null
 }
 
 workload() {
@@ -501,6 +633,93 @@ scenario_heavy_pod() {
 	TIMEOUT=120 wait_for "a rolling update of unrelated pods completes under both policies" k rollout status -n "$NS" deployment/web --timeout=5s
 }
 
+# evict <pod> [query]: posts an Eviction for the pod; prints the API server's
+# answer, fails unless it was accepted.
+evict() {
+	k create --raw "/api/v1/namespaces/$NS/pods/$1/eviction${2:-}" -f - 2>&1 <<EOF
+{"apiVersion": "policy/v1", "kind": "Eviction", "metadata": {"name": "$1", "namespace": "$NS"}}
+EOF
+}
+
+ca_injected() {
+	k get validatingwebhookconfigurations -o json | jq -e 'any(.items[].webhooks[]?;
+		(.name | startswith("evictions.nodeecho.fyannk.dev")) and ((.clientConfig.caBundle // "") != ""))' >/dev/null
+}
+
+# held_pod <name> <app>: a pod a finalizer keeps after its eviction, so that
+# its metadata can still be read.
+held_pod() {
+	k apply -n "$NS" -f - >/dev/null <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $1
+  labels: {app: $2}
+  finalizers: [e2e.example.org/hold]
+spec:
+  terminationGracePeriodSeconds: 0
+  containers: [{name: pause, image: $PAUSE}]
+EOF
+	TIMEOUT=90 wait_for "$1 running" pod_running "$1"
+}
+
+release() {
+	k patch pod -n "$NS" "$1" --type=json -p '[{"op":"remove","path":"/metadata/finalizers"}]' >/dev/null 2>&1 || true
+}
+
+annotation_matches() { [[ $(pod_json "$1" | jq -r --arg k "$2" '.metadata.annotations[$k] // ""') =~ $3 ]]; }
+
+scenario_eviction() {
+	echo "- eviction webhook"
+	TIMEOUT=120 wait_for "the webhook's CA is injected ($CERTS)" ca_injected
+	held_pod evictee e2e-db
+	local out
+	out=$(evict evictee "?dryRun=All") || fail "dry-run eviction refused: $out"
+	hold 3 "a dry-run eviction marks nothing" annotation_absent evictee nodeecho.fyannk.dev/eviction-requested
+	out=$(evict evictee) || fail "eviction refused: $out"
+	wait_for "the eviction is recorded with its time" annotation_matches evictee nodeecho.fyannk.dev/eviction-requested \
+		'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+	wait_for "EvictionRequested event" has_event evictee EvictionRequested
+	release evictee
+
+	(db_rules "$FORCE" && cat <<RULES
+- name: hold
+  podSelector: {matchLabels: {app: e2e-hold}}
+  eviction: {key: e2e.example.org/eviction-refused-at, response: deny, message: "switch over first"}
+RULES
+	) | set_rules
+	wait_for "deny rule loaded" metric_is nodeecho_rules_active 3
+	held_pod holdee e2e-hold
+	TIMEOUT=30 wait_for "the eviction is refused with 429 and the rule's message" refused_429 holdee
+	wait_for "the refusal is recorded too" annotation_matches holdee e2e.example.org/eviction-refused-at '^[0-9]{4}-'
+	wait_for "EvictionRefused event" has_event holdee EvictionRefused
+	wait_for "evictions counted" metric_line '^nodeecho_evictions_total{response="deny",rule="hold"}'
+
+	if [[ $INSTALL == olm ]]; then
+		release holdee
+		db_rules "$FORCE" | set_rules
+		wait_for "rules restored" metric_is nodeecho_rules_active 2
+		return
+	fi
+	# NodeEcho down: failurePolicy Ignore lets the eviction through.
+	k scale -n "$SYS" deployment/nodeecho --replicas=0 >/dev/null
+	wait_for "NodeEcho stopped" bash -c "[[ -z \$(kubectl --kubeconfig '$KCFG' get pods -n '$SYS' -l app.kubernetes.io/name=nodeecho -o name) ]]"
+	out=$(evict holdee) || fail "eviction blocked while NodeEcho is down: $out"
+	ok "with NodeEcho down, evictions go through"
+	release holdee
+	k scale -n "$SYS" deployment/nodeecho --replicas=1 >/dev/null
+	TIMEOUT=180 wait_for "NodeEcho back" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
+	TIMEOUT=60 wait_for "leader ready" leader_ready
+	db_rules "$FORCE" | set_rules
+	wait_for "rules restored" metric_is nodeecho_rules_active 2
+}
+
+refused_429() {
+	local out
+	if out=$(evict "$1"); then fail "the eviction of $1 was accepted"; fi
+	grep -q 'switch over first' <<<"$out" && grep -qE 'TooManyRequests|429' <<<"$out"
+}
+
 scenario_foreign() {
 	echo "- a value from the pod template is never overwritten"
 	k run templated -n "$NS" --image="$PAUSE" --labels=app=e2e-db,rack.example.org/id=from-template \
@@ -521,7 +740,10 @@ scenario_restart() {
 	k rollout restart -n "$SYS" deployment/nodeecho >/dev/null
 	TIMEOUT=120 wait_for "rolling restart completes" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
 	TIMEOUT=60 wait_for "new leader ready" leader_ready
-	hold 10 "no pod written after the restart" rv_unchanged
+	hold 10 "no pod changed after the restart" rv_unchanged
+	# A write that changes nothing leaves the resource versions alone: count
+	# the requests too.
+	hold 5 "no write request after the restart" pod_writes_are 0
 	k uncordon "$n" >/dev/null
 	wait_for "the new leader removes the label" label_absent db-1 nodeecho.fyannk.dev/unschedulable
 }
@@ -549,14 +771,10 @@ scenario_metrics() {
 	echo "- metrics"
 	wait_for "nodeecho_config_valid 1" metric_is nodeecho_config_valid 1
 	wait_for "nodeecho_rules_active 2" metric_is nodeecho_rules_active 2
-	metrics | grep -q '^nodeecho_pod_writes_total{result="ok",rule="db"}' || fail "no pod write counted"
-	ok "pod writes counted"
-	metrics | grep -q '^nodeecho_keys_skipped_total{reason="owned-by-other",rule="db"}' || fail "no skipped key counted"
-	ok "skipped keys counted"
-	metrics | grep -q '^nodeecho_build_info{go_version="go[0-9.]*",version="e2e"} 1$' || fail "no build info"
-	ok "build info published"
-	metrics | grep -q '^nodeecho_config_loads_total{result="valid"}' || fail "no configuration load counted"
-	ok "configuration loads counted"
+	wait_for "pod writes counted" metric_line '^nodeecho_pod_writes_total{result="ok",rule="db"}'
+	wait_for "skipped keys counted" metric_line '^nodeecho_keys_skipped_total{reason="owned-by-other",rule="db"}'
+	wait_for "build info published" metric_line '^nodeecho_build_info{go_version="go[0-9.]*",version="e2e"} 1$'
+	wait_for "configuration loads counted" metric_line '^nodeecho_config_loads_total{result="valid"}'
 
 	[[ $(forward 8443 http_code https /metrics) == 401 ]] || fail "metrics served without a token"
 	ok "metrics refused without a token (401)"
@@ -587,7 +805,9 @@ stdlib_line_logged() {
 
 scenario_pprof() {
 	echo "- pprof"
-	forward 6060 http_body http /debug/pprof/ | grep -q heap || fail "no pprof index"
+	local index
+	index=$(forward 6060 http_body http /debug/pprof/) || fail "no pprof index"
+	grep -q heap <<<"$index" || fail "no pprof index"
 	ok "pprof index served on the pod's loopback"
 	[[ $(forward 6060 http_code http "/debug/pprof/heap?debug=1") == 200 ]] || fail "no heap profile"
 	ok "heap profile served"
@@ -633,7 +853,9 @@ scenario_missing_config() {
 	TIMEOUT=60 wait_for "the leader reports not ready" leader_not_ready
 	k uncordon "$n" >/dev/null
 	hold 8 "nothing written or removed before a configuration" rv_unchanged
-	k logs -n "$SYS" "$(leader)" | grep -q 'Rules ConfigMap not found' || fail "no log line for the missing ConfigMap"
+	local logs
+	logs=$(k logs -n "$SYS" "$(leader)")
+	grep -q 'Rules ConfigMap not found' <<<"$logs" || fail "no log line for the missing ConfigMap"
 	ok "the missing ConfigMap is logged"
 
 	db_rules "$FORCE" | set_rules
@@ -720,8 +942,26 @@ run_variant() {
 		create_cluster "$K3S_NEW" "nodeecho-e2e-gate-off" \
 			--k3s-arg "--kube-apiserver-arg=feature-gates=PodTopologyLabelsAdmission=false@server:*"
 		;;
+	cert-manager) create_cluster "$K3S_NEW" "nodeecho-e2e-cm" ;;
+	helm) create_cluster "$K3S_NEW" "nodeecho-e2e-helm" ;;
+	olm)
+		create_cluster "$K3S_NEW" "nodeecho-e2e-olm" \
+			--registry-create "nodeecho-e2e-registry:0.0.0.0:$REGISTRY_PORT"
+		;;
 	*) echo "unknown variant $variant" >&2 && exit 1 ;;
 	esac
+	CERTS=self-rotated
+	EXTRA_COMPONENTS=""
+	INSTALL=kustomize
+	case $variant in
+	helm) INSTALL=helm ;;
+	olm) INSTALL=olm CERTS=OLM ;;
+	esac
+	if [[ $variant == cert-manager ]]; then
+		install_cert_manager
+		CERTS=cert-manager
+		EXTRA_COMPONENTS=cert-manager
+	fi
 	echo "   $(k version -o json | jq -r .serverVersion.gitVersion), kubeconfig $KCFG"
 	FORCE=false
 	[[ $variant == gate-off ]] && FORCE=true
@@ -733,14 +973,17 @@ run_variant() {
 	scenario_cordon_taint_label
 	scenario_policy
 	scenario_writer_scope
+	scenario_eviction
 	scenario_heavy_pod
 	scenario_foreign
 	scenario_metrics
-	scenario_pprof
-	scenario_restart
-	scenario_failover
+	if [[ $INSTALL != olm ]]; then
+		scenario_pprof
+		scenario_restart
+		scenario_failover
+	fi
 	scenario_bad_config
-	scenario_missing_config
+	[[ $INSTALL != olm ]] && scenario_missing_config
 	scenario_bulk
 	scenario_stop_writing
 	scenario_health

@@ -52,6 +52,10 @@ var (
 		Name: "nodeecho_keys_skipped_total",
 		Help: "Configured keys not written on a pod, by rule and reason.",
 	}, []string{"rule", "reason"})
+	evictions = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "nodeecho_evictions_total",
+		Help: "Eviction requests for pods selected by a rule with an eviction block, by rule and response.",
+	}, []string{"rule", "response"})
 	podWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "nodeecho_pod_writes_total",
 		Help: "Server-side apply requests sent to pods, by rule and result.",
@@ -60,7 +64,7 @@ var (
 
 func init() {
 	metrics.Registry.MustRegister(buildInfo, configLoads, configLastValid, configValid, rulesActive, rulesRefused,
-		keysSkipped, podWrites)
+		keysSkipped, podWrites, evictions)
 }
 
 // SetBuildInfo publishes nodeecho_build_info.

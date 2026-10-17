@@ -12,7 +12,7 @@ rules:
   - apiGroups: [""]
     resources: [pods]
     verbs: [list, watch, patch]
-  - apiGroups: ["", events.k8s.io]
+  - apiGroups: [events.k8s.io]
     resources: [events]
     verbs: [create, patch]
   # The metrics endpoint asks the API server who a scraper is and whether it

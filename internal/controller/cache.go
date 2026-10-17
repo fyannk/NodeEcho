@@ -30,17 +30,24 @@ import (
 
 // CacheOptions keeps in the cache only what NodeEcho reads, since it caches
 // every pod and Node of the cluster: no pod spec but the node name, no
-// status, and only NodeEcho's own field manager entries.
-func CacheOptions() map[client.Object]cache.ByObject {
+// status, only NodeEcho's own field manager entries, and only the pod
+// annotations the rules of the store write.
+//
+// The annotations NodeEcho wrote are kept too, whatever the rules: the cache
+// fills before the rules load, and NodeEcho must see its own keys to write
+// nothing on a restart. The pods cached before a rule change keep the
+// annotations of the earlier rules until they change. That is safe: a
+// foreign value NodeEcho did not see makes its apply conflict, which skips
+// the key as usual.
+func CacheOptions(store *Store) map[client.Object]cache.ByObject {
 	return map[client.Object]cache.ByObject{
-		&corev1.Pod{}:       {Transform: stripPod},
+		&corev1.Pod{}:       {Transform: podStripper(store)},
 		&corev1.Node{}:      {Transform: stripNode},
 		&corev1.Namespace{}: {Transform: stripNamespace},
 	}
 }
 
 var (
-	_ toolscache.TransformFunc = stripPod
 	_ toolscache.TransformFunc = stripNode
 	_ toolscache.TransformFunc = stripNamespace
 )
@@ -57,18 +64,38 @@ func meta(m *metav1.ObjectMeta) metav1.ObjectMeta {
 	}
 }
 
-func stripPod(obj any) (any, error) {
+func podStripper(store *Store) toolscache.TransformFunc {
+	return func(obj any) (any, error) { return stripPod(obj, store.AnnotationKeys()) }
+}
+
+func stripPod(obj any, annotationKeys map[string]bool) (any, error) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return obj, nil
 	}
 	out := &corev1.Pod{TypeMeta: pod.TypeMeta, ObjectMeta: meta(&pod.ObjectMeta), Spec: corev1.PodSpec{NodeName: pod.Spec.NodeName}}
+	out.Annotations = nil
+	_, own := ownedKeysOf(pod, isNodeEchoManager)
+	for k, v := range pod.Annotations {
+		if annotationKeys[k] || own[k] {
+			if out.Annotations == nil {
+				out.Annotations = map[string]string{}
+			}
+			out.Annotations[k] = v
+		}
+	}
 	for _, m := range pod.ManagedFields {
 		if strings.HasPrefix(m.Manager, fieldManagerPrefix) {
 			out.ManagedFields = append(out.ManagedFields, m)
 		}
 	}
 	return out, nil
+}
+
+// isNodeEchoManager matches the field managers of the pod projector and of
+// the eviction webhook.
+func isNodeEchoManager(manager string) bool {
+	return strings.HasPrefix(manager, fieldManagerPrefix) || strings.HasPrefix(manager, evictionManagerPrefix)
 }
 
 func stripNode(obj any) (any, error) {

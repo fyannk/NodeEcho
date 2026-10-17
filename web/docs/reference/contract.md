@@ -81,6 +81,30 @@ key on pods.
   does not write, so NodeEcho copies them. `kubernetes.io/hostname` and every
   other key are copied whenever configured.
 
+### Eviction requests
+
+Only with the optional eviction webhook installed, and for the pods a rule
+with an `eviction` block selects:
+
+| Key (default) | Kind | Value |
+| --- | --- | --- |
+| `nodeecho.fyannk.dev/eviction-requested` | annotation | when NodeEcho received the first eviction request for the pod, RFC 3339 in UTC, for instance `2026-10-16T09:30:00Z` |
+
+- NodeEcho records the request it receives: a `kubectl drain`, a cluster
+  autoscaler or Karpenter scale-down, any client of the eviction API. Later
+  requests, such as the retries of a drain, leave the first time in place.
+- The key stays until the pod is deleted: neither the end of a drain nor a
+  rule change removes it. A pod is evicted once in its life, and a replaced
+  pod is a new object without the key.
+- A dry-run eviction (`?dryRun=All`) records nothing.
+- `eviction.response: allow` (the default) lets the eviction through;
+  `deny` refuses it with HTTP 429 and `eviction.message`, as a
+  PodDisruptionBudget does, so `kubectl drain` and the autoscalers retry it.
+  The request is recorded either way.
+- When NodeEcho is down or has no configuration loaded yet, every eviction
+  goes through (`failurePolicy: Ignore`).
+- The key is written with the field manager `nodeecho-eviction/<rule name>`.
+
 ## Ownership
 
 - NodeEcho writes with server-side apply, field manager `nodeecho/<rule name>`.
@@ -142,6 +166,10 @@ rules:
     copy: []
     target: annotations             # annotations | labels
     prefix: ""
+  eviction:                         # optional block, with the eviction webhook
+    key: nodeecho.fyannk.dev/eviction-requested
+    response: allow                 # allow | deny
+    message: ""                     # with deny; a default names the rule
 ```
 
 A rule is refused, with a log line and a metric, while the other rules keep
@@ -149,17 +177,19 @@ running, when:
 
 - `name` is missing, duplicated or not a DNS-1123 label, or `podSelector` is
   missing or empty;
-- it has no `unschedulable`, `taints`, `labels` or `annotations` block, or a
-  block's `copy` list is empty or repeats a key;
+- it has no `unschedulable`, `taints`, `labels`, `annotations` or `eviction`
+  block, or a block's `copy` list is empty or repeats a key;
+- `eviction.response` is neither `allow` nor `deny`, or `eviction.message` is
+  set with `allow`;
 - a selector or a destination key is invalid;
 - two of its keys resolve to the same pod key;
-- its `unschedulable.key` or `taints.key` is also used by another rule, as
-  an echo key or as a copy destination in the same metadata map (both rules
-  are refused).
+- its `unschedulable.key`, `taints.key` or `eviction.key` is also used by
+  another rule, as such a key or as a copy destination in the same metadata
+  map (both rules are refused).
 
 A refused rule whose name was running keeps its last valid version, so that a
 typo does not remove its keys from every pod, unless a valid rule now uses its
-`unschedulable.key` or `taints.key`.
+`unschedulable.key`, `taints.key` or `eviction.key`.
 
 An unknown `version`, a missing `rules` field, a document that does not
 parse (including an unknown field or a value of the wrong type in any rule),

@@ -1,0 +1,121 @@
+{{- $fullname := include "nodeecho.fullname" . -}}
+{{- $user := include "nodeecho.user" . -}}
+{{- if .Values.policies.reservedKeys.enabled }}
+# Rejects pod creations and updates that add, change or remove a reserved
+# label or annotation, unless NodeEcho makes them.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $fullname }}-reserved-keys
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: not-nodeecho
+      expression: request.userInfo.username != {{ $user | quote }}
+  variables:
+    - name: prefixes
+      expression: {{ concat (list "nodeecho.fyannk.dev/") .Values.policies.reservedKeys.extraPrefixes | uniq | toJson | quote }}
+    - name: newMeta
+      expression: >-
+        [has(object.metadata.labels) ? object.metadata.labels : {},
+         has(object.metadata.annotations) ? object.metadata.annotations : {}]
+    - name: oldMeta
+      expression: >-
+        request.operation == 'CREATE' ? [{}, {}] :
+        [has(oldObject.metadata.labels) ? oldObject.metadata.labels : {},
+         has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}]
+  validations:
+    - expression: >-
+        [0, 1].all(i,
+          variables.newMeta[i].all(k, !variables.prefixes.exists(p, k.startsWith(p)) ||
+            (k in variables.oldMeta[i] && variables.oldMeta[i][k] == variables.newMeta[i][k])) &&
+          variables.oldMeta[i].all(k, !variables.prefixes.exists(p, k.startsWith(p)) ||
+            k in variables.newMeta[i]))
+      message: reserved labels and annotations are written by NodeEcho only
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $fullname }}-reserved-keys
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  policyName: {{ $fullname }}-reserved-keys
+  validationActions: [Deny]
+{{- end }}
+{{- if .Values.policies.writerScope.enabled }}
+{{- $allowed := concat (include "nodeecho.ruleKeys" . | fromJsonArray) .Values.policies.writerScope.extraAllowed | uniq }}
+{{- if not $allowed }}{{- $allowed = list "nodeecho.fyannk.dev/" }}{{- end }}
+---
+# Limits NodeEcho to updating pods, never their spec, owner references or
+# finalizers, and to changing only the labels and annotations its rules
+# write.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ $fullname }}-writer-scope
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: ["*"]
+        resources: [pods, pods/*]
+  matchConditions:
+    - name: nodeecho-only
+      expression: request.userInfo.username == {{ $user | quote }}
+  variables:
+    - name: allowed
+      expression: {{ $allowed | toJson | quote }}
+    - name: newMeta
+      expression: >-
+        [has(object.metadata.labels) ? object.metadata.labels : {},
+         has(object.metadata.annotations) ? object.metadata.annotations : {}]
+    - name: oldMeta
+      expression: >-
+        [has(oldObject.metadata.labels) ? oldObject.metadata.labels : {},
+         has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}]
+    - name: changed
+      expression: >-
+        [0, 1].map(i,
+          variables.newMeta[i].filter(k, !(k in variables.oldMeta[i]) || variables.oldMeta[i][k] != variables.newMeta[i][k]) +
+          variables.oldMeta[i].filter(k, !(k in variables.newMeta[i])))
+    - name: denied
+      expression: >-
+        (variables.changed[0] + variables.changed[1]).filter(k,
+          !variables.allowed.exists(a, a.endsWith('/') ? k.startsWith(a) : k == a))
+  validations:
+    - expression: request.operation == 'UPDATE' && (!has(request.subResource) || request.subResource == '')
+      message: NodeEcho may only update pods
+    - expression: object.spec == oldObject.spec
+      message: NodeEcho may not change a pod's spec
+    - expression: >-
+        (has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) ==
+          (has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : []) &&
+        (has(object.metadata.finalizers) ? object.metadata.finalizers : []) ==
+          (has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : [])
+      message: NodeEcho may not change owner references or finalizers
+    - expression: size(variables.denied) == 0
+      messageExpression: "'NodeEcho may not change ' + variables.denied.join(', ') + '; add the key to policies.writerScope.extraAllowed or to a rule'"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ $fullname }}-writer-scope
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  policyName: {{ $fullname }}-writer-scope
+  validationActions: [Deny]
+{{- end }}

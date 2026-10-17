@@ -279,3 +279,41 @@ func TestParseWholeDocumentTypeErrors(t *testing.T) {
 		t.Fatalf("empty copy key: refused=%v err=%v", refused, err)
 	}
 }
+
+func TestParseEviction(t *testing.T) {
+	const sel = "  podSelector: {matchLabels: {app: db}}\n"
+	rules, refused, err := Parse([]byte(header + "- name: a\n" + sel + "  eviction: {}\n" +
+		"- name: b\n" + sel + "  eviction: {key: x.io/evicted, response: deny}\n"))
+	if err != nil || len(refused) != 0 {
+		t.Fatalf("refused=%v err=%v", refused, err)
+	}
+	if e := rules[0].Eviction; e.Key != DefaultEvictionKey || e.Response != EvictionAllow || e.Message != "" {
+		t.Errorf("defaults = %+v", e)
+	}
+	if e := rules[1].Eviction; e.Response != EvictionDeny || e.Message != "eviction refused by NodeEcho rule b" {
+		t.Errorf("deny defaults = %+v", e)
+	}
+	if got := rules[1].AnnotationKeys(); len(got) != 1 || got[0] != "x.io/evicted" {
+		t.Errorf("annotation keys = %v", got)
+	}
+
+	for name, tc := range map[string]struct{ doc, want string }{
+		"bad response":       {"- name: a\n" + sel + "  eviction: {response: maybe}\n", "eviction.response"},
+		"message with allow": {"- name: a\n" + sel + "  eviction: {message: no}\n", "only used with response: deny"},
+		"bad key":            {"- name: a\n" + sel + "  eviction: {key: 'bad key'}\n", "eviction.key"},
+		"key used twice":     {"- name: a\n" + sel + "  eviction: {key: x.io/k}\n  annotations: {copy: [x.io/k]}\n", "both write"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, refused, err := Parse([]byte(header + tc.doc))
+			if err != nil || len(refused) != 1 || !strings.Contains(refused[0].Error(), tc.want) {
+				t.Fatalf("refused=%v err=%v, want %q", refused, err, tc.want)
+			}
+		})
+	}
+
+	// Two rules marking the same key would race: both are refused.
+	_, refused, err = Parse([]byte(header + "- name: a\n" + sel + "  eviction: {}\n- name: b\n" + sel + "  eviction: {}\n"))
+	if err != nil || len(refused) != 2 {
+		t.Fatalf("shared eviction key: refused=%v err=%v", refused, err)
+	}
+}

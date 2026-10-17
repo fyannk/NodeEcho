@@ -1,0 +1,56 @@
+# cert-manager issues the webhook certificate instead of NodeEcho: a
+# self-signed Issuer, a Certificate into the Secret every replica mounts, and
+# the CA injected into the webhook configuration. Use it after
+# config/components/eviction-webhook; it needs cert-manager installed.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - certificate.yaml
+patches:
+  # cert-manager owns the Secret: drop the empty one and the rotation.
+  - target: {kind: Secret, name: nodeecho-webhook-cert}
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: nodeecho-webhook-cert
+  - target: {kind: Role, name: nodeecho-cert-rotation}
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: nodeecho-cert-rotation
+  - target: {kind: RoleBinding, name: nodeecho-cert-rotation}
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: nodeecho-cert-rotation
+  - target: {kind: ClusterRole, name: nodeecho-cert-rotation}
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: nodeecho-cert-rotation
+  - target: {kind: ClusterRoleBinding, name: nodeecho-cert-rotation}
+    patch: |-
+      $patch: delete
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: nodeecho-cert-rotation
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value: [--leader-elect, --webhook-port=9443]
+  - target: {kind: ValidatingWebhookConfiguration, name: nodeecho-eviction}
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          cert-manager.io/inject-ca-from: nodeecho-system/nodeecho-webhook

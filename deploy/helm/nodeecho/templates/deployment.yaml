@@ -1,0 +1,128 @@
+{{- $fullname := include "nodeecho.fullname" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nodeecho.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "nodeecho.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- $annotations := include "nodeecho.discoveryAnnotations" . }}
+      {{- if or $annotations .Values.podAnnotations }}
+      annotations:
+        {{- with $annotations }}
+        {{- . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $fullname }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: manager
+          image: {{ include "nodeecho.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --leader-elect
+            - --config-name={{ $fullname }}
+            - --zap-log-level={{ .Values.logLevel }}
+            - --metrics-secure={{ .Values.metrics.secure }}
+            - --metrics-bind-address=:{{ include "nodeecho.metricsPort" . }}
+            {{- if .Values.metrics.certSecret }}
+            - --metrics-cert-dir=/tmp/k8s-metrics-server/serving-certs
+            {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - --webhook-port={{ .Values.webhook.port }}
+            - --webhook-service={{ include "nodeecho.webhookService" . }}
+            - --webhook-config={{ $fullname }}-eviction
+            - --cert-secret={{ $fullname }}-webhook-cert
+            {{- if eq .Values.webhook.certificates.provider "self" }}
+            - --cert-rotation
+            {{- end }}
+            {{- end }}
+            {{- with .Values.pprofAddress }}
+            - --pprof-bind-address={{ . }}
+            {{- end }}
+            {{- range .Values.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef: {fieldPath: metadata.namespace}
+            {{- with .Values.goMemLimit }}
+            - name: GOMEMLIMIT
+              value: {{ . | quote }}
+            {{- end }}
+          ports:
+            - {name: {{ include "nodeecho.metricsPortName" . }}, containerPort: {{ include "nodeecho.metricsPort" . }}}
+            - {name: probes, containerPort: 8081}
+            {{- if .Values.webhook.enabled }}
+            - {name: webhook, containerPort: {{ .Values.webhook.port }}}
+            {{- end }}
+          livenessProbe:
+            httpGet: {path: /healthz, port: probes}
+          readinessProbe:
+            httpGet: {path: /readyz, port: probes}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- if or .Values.webhook.enabled .Values.metrics.certSecret }}
+          volumeMounts:
+            {{- if .Values.webhook.enabled }}
+            - {name: webhook-cert, mountPath: /tmp/k8s-webhook-server/serving-certs, readOnly: true}
+            {{- end }}
+            {{- if .Values.metrics.certSecret }}
+            - {name: metrics-cert, mountPath: /tmp/k8s-metrics-server/serving-certs, readOnly: true}
+            {{- end }}
+          {{- end }}
+      {{- if or .Values.webhook.enabled .Values.metrics.certSecret }}
+      volumes:
+        {{- if .Values.webhook.enabled }}
+        - name: webhook-cert
+          secret: {secretName: {{ $fullname }}-webhook-cert}
+        {{- end }}
+        {{- with .Values.metrics.certSecret }}
+        - name: metrics-cert
+          secret: {secretName: {{ . }}}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

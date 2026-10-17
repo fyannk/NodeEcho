@@ -1,0 +1,108 @@
+{{- if .Values.webhook.enabled }}
+{{- $fullname := include "nodeecho.fullname" . -}}
+{{- $service := include "nodeecho.webhookService" . -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $service }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webhook
+spec:
+  selector:
+    {{- include "nodeecho.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: webhook
+---
+# NodeEcho records when it first receives an eviction request for a pod a
+# rule with an eviction block selects, and answers it as the rule says.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ $fullname }}-eviction
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+  {{- if eq .Values.webhook.certificates.provider "cert-manager" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ $fullname }}-webhook
+  {{- end }}
+webhooks:
+  - name: evictions.nodeecho.fyannk.dev
+    admissionReviewVersions: [v1]
+    clientConfig:
+      service:
+        name: {{ $service }}
+        namespace: {{ .Release.Namespace }}
+        path: /evictions
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods/eviction]
+        scope: Namespaced
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    matchPolicy: Equivalent
+    sideEffects: NoneOnDryRun
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    {{- with .Values.webhook.namespaceSelector }}
+    namespaceSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- if eq .Values.webhook.certificates.provider "self" }}
+---
+# Filled and rotated by NodeEcho, mounted by every replica. Helm leaves its
+# content alone on upgrades.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $fullname }}-webhook-cert
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-webhook-cert" $fullname) }}
+{{- if $existing }}
+data:
+  {{- toYaml $existing.data | nindent 2 }}
+{{- else }}
+data:
+  tls.crt: ""
+  tls.key: ""
+{{- end }}
+{{- else if eq .Values.webhook.certificates.provider "cert-manager" }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $fullname }}-selfsigned
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fullname }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $fullname }}-webhook-cert
+  issuerRef:
+    name: {{ $fullname }}-selfsigned
+    kind: Issuer
+  dnsNames:
+    - {{ $service }}.{{ .Release.Namespace }}.svc
+    - {{ $service }}.{{ .Release.Namespace }}.svc.cluster.local
+{{- else }}
+{{- fail (printf "webhook.certificates.provider: %q is not self or cert-manager" .Values.webhook.certificates.provider) }}
+{{- end }}
+{{- end }}

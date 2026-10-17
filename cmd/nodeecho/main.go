@@ -20,16 +20,22 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	stdlog "log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/open-policy-agent/cert-controller/pkg/rotator"
 
 	"go.uber.org/zap/zapcore"
 	corev1 "k8s.io/api/core/v1"
@@ -46,6 +52,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/fyannk/nodeecho/internal/controller"
 	"github.com/fyannk/nodeecho/internal/projection"
@@ -63,11 +70,14 @@ func init() {
 
 func main() {
 	var metricsAddr, metricsCertDir, probeAddr, pprofAddr, configName, configNamespace string
-	var leaderElect, metricsSecure, showVersion bool
+	var leaderElect, metricsSecure, showVersion, certRotation bool
+	var webhookPort int
+	var certDir, certSecret, webhookService, webhookConfig string
 	flag.StringVar(&configName, "config-name", "nodeecho", "Name of the rules ConfigMap.")
 	flag.StringVar(&configNamespace, "config-namespace", os.Getenv("POD_NAMESPACE"),
 		"Namespace of the rules ConfigMap, NodeEcho's own namespace (default $POD_NAMESPACE).")
-	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8443", "Address the metrics endpoint binds to; \"0\" disables it.")
+	flag.StringVar(&metricsAddr, "metrics-bind-address", "",
+		"Address the metrics endpoint binds to; \"0\" disables it. Defaults to :8443 with --metrics-secure, :8080 without.")
 	flag.BoolVar(&metricsSecure, "metrics-secure", true,
 		"Serve metrics over HTTPS, to clients the API server authenticates and authorizes for GET /metrics.")
 	flag.StringVar(&metricsCertDir, "metrics-cert-dir", "",
@@ -77,6 +87,15 @@ func main() {
 		"Address the pprof endpoint binds to, for instance 127.0.0.1:6060; empty disables it. Unauthenticated.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election, for more than one replica.")
 	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
+	flag.IntVar(&webhookPort, "webhook-port", 0, "Port of the eviction webhook; 0 disables it.")
+	flag.StringVar(&certDir, "cert-dir", "/tmp/k8s-webhook-server/serving-certs",
+		"Directory with the webhook's tls.crt and tls.key, mounted from a Secret or provided by OLM.")
+	flag.BoolVar(&certRotation, "cert-rotation", false,
+		"Generate and rotate the webhook certificate in --cert-secret, and inject its CA into the webhook configuration.")
+	flag.StringVar(&certSecret, "cert-secret", "nodeecho-webhook-cert", "Secret holding the rotated webhook certificate.")
+	flag.StringVar(&webhookService, "webhook-service", "nodeecho-webhook", "Service of the webhook, named in its certificate.")
+	flag.StringVar(&webhookConfig, "webhook-config", "nodeecho-eviction",
+		"ValidatingWebhookConfiguration that receives the rotated certificate's CA.")
 	// Production defaults: JSON lines, ISO 8601 times, stack traces on
 	// panics only. The --zap-* flags override them.
 	opts := zap.Options{
@@ -114,6 +133,13 @@ func main() {
 	}
 	controller.SetBuildInfo(version, goVersion())
 
+	if metricsAddr == "" {
+		metricsAddr = ":8080"
+		if metricsSecure {
+			metricsAddr = ":8443"
+		}
+	}
+	store := &controller.Store{}
 	metricsOpts := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: metricsSecure,
@@ -128,7 +154,7 @@ func main() {
 		Scheme: scheme,
 		// NodeEcho reads ConfigMaps in its own namespace only, and caches
 		// pods, Nodes and Namespaces stripped to what it reads.
-		Cache:                  cache.Options{ByObject: cacheOptions(configNamespace)},
+		Cache:                  cache.Options{ByObject: cacheOptions(configNamespace, store)},
 		Metrics:                metricsOpts,
 		HealthProbeBindAddress: probeAddr,
 		PprofBindAddress:       pprofAddr,
@@ -144,13 +170,13 @@ func main() {
 	}
 
 	ctx := ctrl.SetupSignalHandler()
-	store := &controller.Store{}
 	resync := make(chan event.GenericEvent)
 	if err := (&controller.ConfigReconciler{
 		Client:    mgr.GetClient(),
 		ConfigMap: types.NamespacedName{Namespace: configNamespace, Name: configName},
 		Store:     store,
 		Resync:    resync,
+		Elected:   mgr.Elected(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Unable to set up the rules controller")
 		os.Exit(1)
@@ -166,15 +192,51 @@ func main() {
 		os.Exit(1)
 	}
 
+	webhookReady := healthz.Checker(healthz.Ping)
+	if webhookPort != 0 {
+		if certRotation {
+			service := webhookService + "." + configNamespace + ".svc"
+			if err := rotator.AddRotator(mgr, &rotator.CertRotator{
+				SecretKey:      types.NamespacedName{Namespace: configNamespace, Name: certSecret},
+				CertDir:        certDir,
+				CAName:         "nodeecho-ca",
+				CAOrganization: "NodeEcho",
+				DNSName:        service,
+				ExtraDNSNames:  []string{webhookService, webhookService + "." + configNamespace, service + ".cluster.local"},
+				IsReady:        make(chan struct{}),
+				Webhooks:       []rotator.WebhookInfo{{Name: webhookConfig, Type: rotator.Validating}},
+				FieldOwner:     "nodeecho-cert-rotator",
+				// Only the leader rotates; every instance reads the Secret
+				// through its volume.
+				RequireLeaderElection: leaderElect,
+			}); err != nil {
+				setupLog.Error(err, "Unable to set up the certificate rotation")
+				os.Exit(1)
+			}
+		}
+		server := webhook.NewServer(webhook.Options{Port: webhookPort, CertDir: certDir})
+		server.Register(controller.EvictionPath, &webhook.Admission{Handler: &controller.EvictionWebhook{
+			Client:   mgr.GetClient(),
+			Store:    store,
+			Recorder: mgr.GetEventRecorder("nodeecho"),
+		}})
+		webhookReady = serveWhenCertified(ctx, mgr, server, certDir)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Unable to set up the health check")
 		os.Exit(1)
 	}
-	// The elected instance is ready once a valid configuration is loaded:
-	// before that, it writes nothing. A standby instance runs no controller
-	// and is ready, so that a rolling update can start the next instance
-	// while the current one holds the lease.
-	if err := mgr.AddReadyzCheck("readyz", func(*http.Request) error {
+	// With the webhook, every instance is ready once it serves it: before
+	// its rules are loaded, it lets every eviction through. The elected
+	// instance is also ready only once a valid configuration is loaded:
+	// before that, it writes nothing. A standby instance runs no projector
+	// and stays ready without one, so that a rolling update can start the
+	// next instance while the current one holds the lease.
+	if err := mgr.AddReadyzCheck("readyz", func(req *http.Request) error {
+		if err := webhookReady(req); err != nil {
+			return err
+		}
 		select {
 		case <-mgr.Elected():
 		default:
@@ -192,10 +254,48 @@ func main() {
 	setupLog.Info("Starting manager", "version", version, "goVersion", goVersion(),
 		"configMap", configNamespace+"/"+configName, "kubernetesCopiesTopology", copiesTopology,
 		"leaderElection", leaderElect, "metricsAddress", metricsAddr, "metricsSecure", metricsSecure,
-		"pprofAddress", pprofAddr)
+		"pprofAddress", pprofAddr, "webhookPort", webhookPort, "certDir", certDir, "certRotation", certRotation)
 	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Manager stopped")
 		os.Exit(1)
+	}
+}
+
+// serveWhenCertified adds the webhook server to the manager once its
+// certificate files hold a key pair: a mounted Secret appears some time after the pod
+// starts, and a just rotated one after the kubelet's next sync. It returns
+// the readiness check of the webhook.
+func serveWhenCertified(ctx context.Context, mgr ctrl.Manager, server webhook.Server, certDir string) healthz.Checker {
+	var added atomic.Bool
+	go func() {
+		logged := false
+		for {
+			// The Secret NodeEcho rotates starts empty: wait for a key pair.
+			if _, err := tls.LoadX509KeyPair(filepath.Join(certDir, "tls.crt"), filepath.Join(certDir, "tls.key")); err == nil {
+				if err := mgr.Add(server); err != nil {
+					setupLog.Error(err, "Unable to start the webhook server")
+					os.Exit(1)
+				}
+				added.Store(true)
+				setupLog.Info("Webhook certificate found, serving the eviction webhook", "certDir", certDir)
+				return
+			}
+			if !logged {
+				setupLog.Info("Waiting for the webhook certificate", "certDir", certDir)
+				logged = true
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}()
+	return func(req *http.Request) error {
+		if !added.Load() {
+			return errors.New("webhook certificate not found yet")
+		}
+		return server.StartedChecker()(req)
 	}
 }
 
@@ -215,8 +315,8 @@ func goVersion() string {
 	return "unknown"
 }
 
-func cacheOptions(configNamespace string) map[client.Object]cache.ByObject {
-	opts := controller.CacheOptions()
+func cacheOptions(configNamespace string, store *controller.Store) map[client.Object]cache.ByObject {
+	opts := controller.CacheOptions(store)
 	opts[&corev1.ConfigMap{}] = cache.ByObject{Namespaces: map[string]cache.Config{configNamespace: {}}}
 	return opts
 }

@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -71,6 +72,18 @@ type Store struct {
 	mu     sync.RWMutex
 	loaded bool
 	rules  []Rule
+	// annotationKeys are the pod annotation keys the rules write: the only
+	// pod annotations the cache keeps.
+	annotationKeys atomic.Pointer[map[string]bool]
+}
+
+// AnnotationKeys returns the pod annotation keys the active rules write.
+// The map must not be modified.
+func (s *Store) AnnotationKeys() map[string]bool {
+	if keys := s.annotationKeys.Load(); keys != nil {
+		return *keys
+	}
+	return nil
 }
 
 // Loaded reports whether a valid configuration has been loaded.
@@ -130,6 +143,13 @@ func (s *Store) Set(valid []config.Rule, refused []config.RuleError) (changed bo
 	changed = !s.loaded || !sameRules(s.rules, next)
 	s.rules = next
 	s.loaded = true
+	keys := map[string]bool{}
+	for i := range next {
+		for _, k := range next[i].AnnotationKeys() {
+			keys[k] = true
+		}
+	}
+	s.annotationKeys.Store(&keys)
 	return changed, kept, nil
 }
 

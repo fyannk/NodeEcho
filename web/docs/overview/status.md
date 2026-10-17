@@ -17,15 +17,20 @@ title: Status
   and 1.36 with `PodTopologyLabelsAdmission` off: echo and cleanup, both
   admission policies, restarts, leader failover, invalid and missing
   configurations, and a cordon reaching 120 pods.
-- Authenticated HTTPS metrics, Prometheus alerts with unit tests, a Grafana
+- Authenticated HTTPS metrics, or plain HTTP with discovery annotations for
+  Prometheus and OpenTelemetry; Prometheus alerts with unit tests, a Grafana
   dashboard, structured JSON logs and an optional pprof endpoint.
+- An optional eviction webhook, with its certificate from NodeEcho's own
+  rotation, cert-manager or OLM.
+- Three install paths kept consistent by a check: kustomize, a Helm chart, an
+  OLM bundle and catalog, each tested end to end on k3d.
 - A scale measurement on fake Nodes: about 120 MiB at 20,000 pods, one write
   per pod that needs one. See [Sizing](../operator/sizing.md).
 
 ## Missing before production
 
-- **A release.** No image is published, and the manifests use
-  `nodeecho:latest`. The Dockerfile builds `linux/amd64` only.
+- **A release.** The pipeline is ready (multi-arch image, chart, bundle and
+  catalog on a `v*` tag), but no version has been tagged yet.
 - **A soak test.** The tests run for minutes, not hours, and do not restart
   the API server or break watches.
 - **A staging run with a consumer.** Upstream CloudNativePG does not read the

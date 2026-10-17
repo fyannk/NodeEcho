@@ -1,0 +1,48 @@
+{{- $fullname := include "nodeecho.fullname" . -}}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "nodeecho.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: {{ include "nodeecho.metricsPortName" . }}
+      scheme: {{ include "nodeecho.metricsScheme" . }}
+      path: /metrics
+      {{- with .Values.metrics.serviceMonitor.interval }}
+      interval: {{ . }}
+      {{- end }}
+      {{- if .Values.metrics.secure }}
+      # Prometheus's token; bind its ServiceAccount with metrics.readers.
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        insecureSkipVerify: true
+      {{- end }}
+{{- end }}
+{{- if .Values.metrics.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $fullname }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "nodeecho.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- /* The alerts select job="nodeecho-metrics", the Service name of the
+  kustomize manifests; here it is the release's. */}}
+  {{- .Files.Get "files/alerts.yaml" | replace "job=\"nodeecho-metrics\"" (printf "job=\"%s-metrics\"" $fullname) | nindent 2 }}
+{{- end }}

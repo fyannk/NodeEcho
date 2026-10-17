@@ -13,6 +13,7 @@ make test     # unit, fuzz-seed and envtest tests
 make lint     # golangci-lint and the toolchain check
 make vuln     # govulncheck
 make test-alerts  # promtool check and unit tests of the alerts (docker)
+make validate-packaging  # manifests, Helm chart, OLM bundle and catalog agree
 ```
 
 ## Layout
@@ -35,9 +36,11 @@ make test-alerts  # promtool check and unit tests of the alerts (docker)
 - **envtest**: `make test` downloads a real API server and etcd
   (`ENVTEST_K8S_VERSION`, default 1.36.2) and runs the controller against
   them.
-- **End to end**: `make e2e` runs NodeEcho on throwaway k3d clusters for
-  Kubernetes 1.34, 1.36, and 1.36 with `PodTopologyLabelsAdmission` off.
-  Needs Docker, k3d, kubectl and jq.
+- **End to end**: `make e2e` runs NodeEcho on throwaway k3d clusters, one per
+  variant: Kubernetes 1.34, 1.36, 1.36 with `PodTopologyLabelsAdmission`
+  off, cert-manager certificates, the Helm chart, and OLM from the bundle and
+  catalog served by a local registry. Needs Docker, k3d, kubectl and jq; helm
+  and operator-sdk for their variants. `E2E_VARIANTS` picks some.
 - **Scale**: `make scale` measures memory, API requests and latency with
   thousands of pods on fake Nodes.
 
@@ -72,6 +75,29 @@ checks that every line NodeEcho prints is JSON.
 runs its unit tests, `config/prometheus/alerts_test.yaml`, in pinned
 containers. Add a test with every new alert. The end-to-end test checks that
 every metric the alerts and the dashboard use is exposed.
+
+## Packaging
+
+The kustomize manifests (`config/`), the Helm chart (`deploy/helm`) and the
+OLM bundle and catalog (`deploy/olm`) are written by hand.
+`make validate-packaging` checks that they agree: one version everywhere,
+the same permissions, ports and environment, the chart's and the bundle's
+copies of the `config/` files; it also lints and renders the chart in its
+variants and validates the bundle and the catalog when `operator-sdk` and
+`opm` are installed. CI runs it.
+
+A `v*` tag publishes the multi-arch image, the bundle and catalog images, and
+the chart (`images.yml`, `release.yml`); the tag must match the chart's
+version.
+
+## Dependencies
+
+Dependabot follows the Go module, the GitHub Actions and the image bases,
+not the documentation site: its build tooling is most of the noise and none
+of it ships with NodeEcho. In `web/package.json`, the libraries that reach
+the reader's browser (React, MDX, Prism) are `dependencies`; everything else
+is a `devDependency`, which GitHub's default auto-triage dismisses as
+development-scoped when Dependabot alerts are on.
 
 ## This site
 

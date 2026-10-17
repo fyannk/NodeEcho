@@ -16,7 +16,9 @@
 #   SCALE_K3S       k3s image (default rancher/k3s:v1.36.5-k3s1)
 #   SCALE_KEEP      1 keeps the cluster
 #   E2E_NETWORK     existing Docker network for the k3d node
-#   E2E_SKIP_BUILD  1 reuses an existing nodeecho:e2e image
+#   E2E_SKIP_BUILD  1 reuses an existing image
+#   SCALE_IMAGE     image to measure (default nodeecho:e2e, built here)
+#   SCALE_METRICS_PORT  its plain HTTP metrics port (default 8080)
 
 set -euo pipefail
 
@@ -24,7 +26,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PODS=${SCALE_PODS:-5000}
 NODES=${SCALE_NODES:-50}
 K3S=${SCALE_K3S:-rancher/k3s:v1.36.5-k3s1}
-IMG=nodeecho:e2e
+IMG=${SCALE_IMAGE:-nodeecho:e2e}
 SYS=nodeecho-system
 NS=scale
 CLUSTER=nodeecho-scale
@@ -71,9 +73,9 @@ wait_count() {
 }
 
 leader() { k get lease -n "$SYS" nodeecho.fyannk.dev -o jsonpath='{.spec.holderIdentity}' | cut -d_ -f1; }
-# Metrics are served over plain HTTP here (see the overlay), so that the API
-# server proxy can read them.
-metrics() { k get --raw "/api/v1/namespaces/$SYS/pods/$(leader):8443/proxy/metrics"; }
+# Metrics are served over plain HTTP here (the metrics-http component), so
+# that the API server proxy can read them.
+metrics() { k get --raw "/api/v1/namespaces/$SYS/pods/$(leader):${SCALE_METRICS_PORT:-8080}/proxy/metrics"; }
 
 # snapshot <label>: NodeEcho's memory and its API requests so far.
 snapshot() {
@@ -141,20 +143,18 @@ cat >"$overlay/kustomization.yaml" <<EOF
 resources:
   - $(realpath --relative-to="$overlay" "$ROOT")/config/default
   - $(realpath --relative-to="$overlay" "$ROOT")/config/policy
+components:
+  - $(realpath --relative-to="$overlay" "$ROOT")/config/components/metrics-http
 images:
   - name: nodeecho
-    newTag: e2e
+    newName: ${IMG%:*}
+    newTag: ${IMG##*:}
 patches:
   - target: {kind: ValidatingAdmissionPolicy, name: nodeecho-writer-scope}
     patch: |-
       - op: replace
         path: /spec/variables/0/expression
         value: "['nodeecho.fyannk.dev/', 'rack.example.org/']"
-  - target: {kind: Deployment, name: nodeecho}
-    patch: |-
-      - op: add
-        path: /spec/template/spec/containers/0/args/-
-        value: --metrics-secure=false
 EOF
 k apply -k "$overlay" >/dev/null
 k rollout status -n "$SYS" deployment/nodeecho --timeout=180s >/dev/null
@@ -168,13 +168,15 @@ snapshot "idle, no pod"
 for i in $(seq 0 $((NODES - 1))); do
 	printf -- '---\napiVersion: v1\nkind: Node\nmetadata:\n  name: fake-%d\n  labels: {rack.example.org/id: rack-%d, type: fake}\n' "$i" $((i % 10))
 done | k apply -f - >/dev/null
+FILLER=$(printf 'x%.0s' $(seq 1024))
 gen_pods() {
 	local from=$1 to=$2 i app
 	for ((i = from; i < to; i++)); do
 		app=scale-db
 		((i % 2)) && app=scale-other
-		printf -- '---\napiVersion: v1\nkind: Pod\nmetadata: {name: p%d, labels: {app: %s}}\nspec:\n  nodeName: fake-%d\n  tolerations: [{operator: Exists}]\n  containers: [{name: c, image: example.org/never:pulled}]\n' \
-			"$i" "$app" $((i % NODES))
+		# A 1 KiB annotation, as tools and controllers leave on real pods.
+		printf -- '---\napiVersion: v1\nkind: Pod\nmetadata: {name: p%d, labels: {app: %s}, annotations: {example.org/config: "%s"}}\nspec:\n  nodeName: fake-%d\n  tolerations: [{operator: Exists}]\n  containers: [{name: c, image: example.org/never:pulled}]\n' \
+			"$i" "$app" "$FILLER" $((i % NODES))
 	done
 }
 start=$(now_ms)

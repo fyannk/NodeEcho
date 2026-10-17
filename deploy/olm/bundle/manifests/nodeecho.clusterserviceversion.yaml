@@ -1,0 +1,152 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  name: nodeecho.v0.1.0
+  namespace: placeholder
+  annotations:
+    capabilities: Basic Install
+    categories: Developer Tools
+    containerImage: ghcr.io/fyannk/nodeecho:0.1.0
+    createdAt: "2026-10-16T00:00:00Z"
+    repository: https://github.com/fyannk/NodeEcho
+    support: https://github.com/fyannk/NodeEcho/issues
+    description: Echoes Node facts (cordon, taints, labels, annotations) onto the
+      pods running there, so namespace-scoped operators need no access to Nodes.
+spec:
+  displayName: NodeEcho
+  description: |
+    NodeEcho watches Nodes and writes what its rules ask for onto the pods
+    running there, as pod labels and annotations: `spec.unschedulable`,
+    selected taints, selected labels and annotations. An operator that only has
+    rights in its own namespace can then react to a cordoned node, a
+    maintenance taint or a failure domain by reading its own pods.
+
+    The rules live in the ConfigMap `nodeecho` of NodeEcho's namespace; they
+    start empty, and NodeEcho writes nothing until you add some. The eviction
+    webhook records when NodeEcho first receives an eviction request for a pod
+    a rule selects, and answers it as the rule says; it lets every eviction
+    through otherwise, and while NodeEcho is down.
+
+    Documentation: https://fyannk.github.io/NodeEcho/
+  version: 0.1.0
+  maturity: alpha
+  minKubeVersion: 1.30.0
+  provider:
+    name: fyannk
+    url: https://github.com/fyannk/NodeEcho
+  links:
+    - name: Documentation
+      url: https://fyannk.github.io/NodeEcho/
+    - name: Source
+      url: https://github.com/fyannk/NodeEcho
+  maintainers:
+    - name: fyannk
+      email: fyannk@fyannk.dev
+  keywords: [nodes, cordon, taints, topology, eviction, cloudnativepg]
+  icon:
+    - base64data: PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJOb2RlRWNobyI+CiAgPHRpdGxlPk5vZGVFY2hvPC90aXRsZT4KICA8IS0tIFRoZSBOb2RlOiBhIHNlcnZlciBibG9jay4gLS0+CiAgPHJlY3QgeD0iNCIgeT0iMTgiIHdpZHRoPSIyNCIgaGVpZ2h0PSIyOCIgcng9IjQiIGZpbGw9IiNmN2ZhZmQiLz4KICA8cmVjdCB4PSI5IiB5PSIyNSIgd2lkdGg9IjE0IiBoZWlnaHQ9IjMiIHJ4PSIxLjUiIGZpbGw9IiMwYzMxNjQiLz4KICA8cmVjdCB4PSI5IiB5PSIzMSIgd2lkdGg9IjE0IiBoZWlnaHQ9IjMiIHJ4PSIxLjUiIGZpbGw9IiMwYzMxNjQiLz4KICA8Y2lyY2xlIGN4PSIyMCIgY3k9IjM5LjUiIHI9IjIiIGZpbGw9IiM2MGJkZWIiLz4KICA8IS0tIEl0cyBlY2hvLCByZWFjaGluZyB0aGUgcG9kLiAtLT4KICA8cGF0aCBkPSJNMzMgMjVhMTAgMTAgMCAwIDEgMCAxNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjNjBiZGViIiBzdHJva2Utd2lkdGg9IjMuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPHBhdGggZD0iTTM5IDIwYTE3IDE3IDAgMCAxIDAgMjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzYwYmRlYiIgc3Ryb2tlLXdpZHRoPSIzLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgb3BhY2l0eT0iLjciLz4KICA8IS0tIFRoZSBwb2QuIC0tPgogIDxjaXJjbGUgY3g9IjU0IiBjeT0iMzIiIHI9IjciIGZpbGw9IiM2MGJkZWIiLz4KICA8Y2lyY2xlIGN4PSI1NCIgY3k9IjMyIiByPSIzIiBmaWxsPSIjZjdmYWZkIi8+Cjwvc3ZnPgo=
+      mediatype: image/svg+xml
+  installModes:
+    - type: OwnNamespace
+      supported: false
+    - type: SingleNamespace
+      supported: false
+    - type: MultiNamespace
+      supported: false
+    - type: AllNamespaces
+      supported: true
+  install:
+    strategy: deployment
+    spec:
+      clusterPermissions:
+        - serviceAccountName: nodeecho
+          rules:
+            - apiGroups: [""]
+              resources: [nodes, namespaces]
+              verbs: [list, watch]
+            - apiGroups: [""]
+              resources: [pods]
+              verbs: [list, watch, patch]
+            - apiGroups: [events.k8s.io]
+              resources: [events]
+              verbs: [create, patch]
+            - apiGroups: [authentication.k8s.io]
+              resources: [tokenreviews]
+              verbs: [create]
+            - apiGroups: [authorization.k8s.io]
+              resources: [subjectaccessreviews]
+              verbs: [create]
+      permissions:
+        - serviceAccountName: nodeecho
+          rules:
+            - apiGroups: [""]
+              resources: [configmaps]
+              verbs: [get, list, watch]
+            - apiGroups: [coordination.k8s.io]
+              resources: [leases]
+              verbs: [get, list, watch, create, update, patch, delete]
+      deployments:
+        - name: nodeecho
+          label:
+            app.kubernetes.io/name: nodeecho
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app.kubernetes.io/name: nodeecho
+            template:
+              metadata:
+                labels:
+                  app.kubernetes.io/name: nodeecho
+              spec:
+                serviceAccountName: nodeecho
+                securityContext:
+                  runAsNonRoot: true
+                  seccompProfile:
+                    type: RuntimeDefault
+                containers:
+                  - name: manager
+                    image: ghcr.io/fyannk/nodeecho:0.1.0
+                    # OLM issues the webhook certificate and mounts it in
+                    # /tmp/k8s-webhook-server/serving-certs, NodeEcho's
+                    # default --cert-dir.
+                    args: [--leader-elect, --webhook-port=9443]
+                    env:
+                      - name: POD_NAMESPACE
+                        valueFrom:
+                          fieldRef: {fieldPath: metadata.namespace}
+                      - name: GOMEMLIMIT
+                        value: 450MiB
+                    ports:
+                      - {name: https-metrics, containerPort: 8443}
+                      - {name: probes, containerPort: 8081}
+                      - {name: webhook, containerPort: 9443}
+                    livenessProbe:
+                      httpGet: {path: /healthz, port: probes}
+                    readinessProbe:
+                      httpGet: {path: /readyz, port: probes}
+                    resources:
+                      requests: {cpu: 10m, memory: 128Mi}
+                      limits: {memory: 512Mi}
+                    securityContext:
+                      allowPrivilegeEscalation: false
+                      readOnlyRootFilesystem: true
+                      capabilities:
+                        drop: [ALL]
+  webhookdefinitions:
+    - type: ValidatingAdmissionWebhook
+      generateName: evictions.nodeecho.fyannk.dev
+      deploymentName: nodeecho
+      containerPort: 443
+      targetPort: 9443
+      webhookPath: /evictions
+      admissionReviewVersions: [v1]
+      failurePolicy: Ignore
+      sideEffects: NoneOnDryRun
+      timeoutSeconds: 5
+      rules:
+        - apiGroups: [""]
+          apiVersions: [v1]
+          operations: [CREATE]
+          resources: [pods/eviction]
+          scope: Namespaced

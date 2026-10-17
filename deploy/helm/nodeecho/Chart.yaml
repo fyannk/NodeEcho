@@ -1,0 +1,23 @@
+apiVersion: v2
+name: nodeecho
+description: NodeEcho echoes Node facts (cordon, taints, labels, annotations) onto the pods running there, so namespace-scoped operators need no access to Nodes.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - nodes
+  - cordon
+  - taints
+  - topology
+  - cloudnativepg
+home: https://fyannk.github.io/NodeEcho/
+icon: https://raw.githubusercontent.com/fyannk/NodeEcho/main/web/static/img/logo.svg
+sources:
+  - https://github.com/fyannk/NodeEcho
+maintainers:
+  - name: fyannk
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/prerelease: "true"

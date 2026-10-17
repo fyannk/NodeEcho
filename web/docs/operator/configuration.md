@@ -46,6 +46,9 @@ Each block is optional, but a rule needs at least one. Every field is in the
 | `annotations` | `copy` | required | Node annotation keys |
 | | `target` | `annotations` | where they go on the pod |
 | | `prefix` | `""` | prepended to each key |
+| `eviction` | `key` | `nodeecho.fyannk.dev/eviction-requested` | pod annotation recording the first eviction request, with the [eviction webhook](eviction-webhook.md) |
+| | `response` | `allow` | `allow` or `deny` (HTTP 429) |
+| | `message` | names the rule | the refusal's message, with `deny` |
 
 ## Examples
 
@@ -109,8 +112,10 @@ A refused rule is logged and counted; the others keep running.
 - No block, or an empty `copy`, or a key listed twice.
 - An invalid selector or key, including a prefix that makes the key invalid.
 - Two keys of the rule landing on the same pod key.
-- An `unschedulable.key` or `taints.key` that another rule also uses, as an
-  echo key or as a copy destination: both rules are refused.
+- An `unschedulable.key`, `taints.key` or `eviction.key` that another rule
+  also uses, as such a key or as a copy destination: both rules are refused.
+- An `eviction.response` other than `allow` or `deny`, or an
+  `eviction.message` with `allow`.
 
 A refused rule that was already running keeps its last valid version, so a
 typo does not strip its keys from every pod.
@@ -122,6 +127,7 @@ the wrong type, or a missing ConfigMap. To stop writing, set `rules: []`.
 ## Admission policies
 
 When the [writer-scope policy](admission-policies.md) is installed, every
-destination key of every rule must be on its allowed list. A key outside it
+destination key of every rule must be on its allowed list; the Helm chart
+computes the list from the rules in its values. A key outside it
 makes the rule's write on that pod fail, reported as a `KeySkipped` Warning
 Event.
