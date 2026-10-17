@@ -13,6 +13,7 @@ jobs:
   build-push:
     name: Build and push images
     permissions:
+      contents: read # check out the private repository
       packages: write # push to ghcr
     runs-on: ubuntu-latest
     steps:

@@ -13,8 +13,8 @@ if [ -z "$mod" ]; then
   exit 2
 fi
 
-# "FROM golang:1.27.0@sha256:... AS builder" -> "1.27.0"
-img=$(sed -n 's|^FROM golang:\([0-9][0-9.]*\)[@ ].*|\1|p' Dockerfile)
+# "FROM [--platform=...] golang:1.27.0@sha256:... AS builder" -> "1.27.0"
+img=$(sed -n 's|^FROM \(--platform=[^ ]* \)\{0,1\}golang:\([0-9][0-9.]*\)[@ ].*|\2|p' Dockerfile)
 if [ -z "$img" ]; then
   echo "no golang builder image in Dockerfile" >&2
   exit 2
