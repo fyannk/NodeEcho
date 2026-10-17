@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://fyannk.github.io/NodeEcho/
+    about: Concepts, installation, the rules, the contract and the operator pages.
+  - name: Security vulnerability
+    url: https://github.com/fyannk/NodeEcho/security/advisories/new
+    about: Report it privately, never in a public issue. See SECURITY.md.

@@ -75,6 +75,17 @@ touch the default one. Set `E2E_NETWORK` to attach the k3d nodes to an
 existing Docker network, for instance one that reaches an HTTP proxy. See
 [Development](web/docs/development.md) for more.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md): one change per pull request,
+signed-off Conventional Commits, and AI assistance disclosed wherever it
+appears. [AGENTS.md](AGENTS.md) holds the rules for anyone, human or agent,
+working in the repository.
+
+## Security
+
+Report vulnerabilities privately, see [SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache License 2.0, see [LICENSE](LICENSE).

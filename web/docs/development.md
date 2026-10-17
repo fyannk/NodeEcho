@@ -99,6 +99,14 @@ the reader's browser (React, MDX, Prism) are `dependencies`; everything else
 is a `devDependency`, which GitHub's default auto-triage dismisses as
 development-scoped when Dependabot alerts are on.
 
+## Contributing
+
+[CONTRIBUTING.md](https://github.com/fyannk/NodeEcho/blob/main/CONTRIBUTING.md)
+in the repository says how a change gets in: one change per pull request,
+signed-off Conventional Commits, a test that fails without the change, the
+contract and this site updated in the same change, and AI assistance
+disclosed wherever it appears.
+
 ## This site
 
 ```bash

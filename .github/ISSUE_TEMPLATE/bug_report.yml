@@ -1,0 +1,71 @@
+name: Bug report
+description: NodeEcho did not do what the contract says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [contract](https://fyannk.github.io/NodeEcho/docs/reference/contract) and the
+        [troubleshooting page](https://fyannk.github.io/NodeEcho/docs/operator/troubleshooting) first.
+        A vulnerability is reported privately, see SECURITY.md, never here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What NodeEcho wrote, or did not write, and what you expected from the contract.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce
+      description: The Node change, the pod, and the commands or events that show the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: rules
+    attributes:
+      label: Rules
+      description: The rules ConfigMap, or the part of it that matters.
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: NodeEcho version
+      description: The image tag, or the commit for a build from source.
+    validations:
+      required: true
+  - type: input
+    id: kubernetes
+    attributes:
+      label: Kubernetes version and distribution
+      placeholder: "1.36.2, k3s"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install path
+      options:
+        - kustomize
+        - Helm
+        - OLM
+        - other (say which below)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and events
+      description: Relevant NodeEcho log lines (JSON) and Warning Events on the pod, if any.
+      render: text
+  - type: dropdown
+    id: disclosure
+    attributes:
+      label: AI assistance
+      description: Mandatory. Any AI help with this issue (text, analysis, reproduction) is disclosed; say which tool and what it did in the description above.
+      options:
+        - "No AI assistance"
+        - "AI-assisted, disclosed above"
+    validations:
+      required: true

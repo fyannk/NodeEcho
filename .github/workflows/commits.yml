@@ -1,0 +1,25 @@
+name: Commits
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Sign-off and subject of every commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Every commit of the pull request: a Conventional Commits subject and
+      # a Signed-off-by trailer with the author's email (DCO).
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: ./hack/check-commits.sh "$BASE" "$HEAD"

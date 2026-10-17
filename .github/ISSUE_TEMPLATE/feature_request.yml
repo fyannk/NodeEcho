@@ -1,0 +1,39 @@
+name: Feature request
+description: Something NodeEcho should echo, or a way it should be installed or observed.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        NodeEcho copies Node facts onto pods as they are. It never derives a decision
+        from them; that policy belongs to the consumer. A request that fits this
+        stays short; one that does not is better discussed before any code.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What a consumer needs and cannot get today, and why Node access is not an option for it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposal
+      description: The Node fact to echo and the pod key it would land in, or the install or observability change.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including doing it on the consumer's side, or with an existing rule.
+  - type: dropdown
+    id: disclosure
+    attributes:
+      label: AI assistance
+      description: Mandatory. Any AI help with this request is disclosed; say which tool and what it did above.
+      options:
+        - "No AI assistance"
+        - "AI-assisted, disclosed above"
+    validations:
+      required: true

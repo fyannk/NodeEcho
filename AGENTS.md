@@ -104,8 +104,13 @@ cd web && npm ci && npm run typecheck && npm run build
 
 - Conventional Commits, compact: a subject line and a short what/why body.
   No issue or PR numbers in commit messages.
-- Commits are signed off (`git commit -s`) by the human author, and carry no
-  tool attribution trailers (no `Co-Authored-By` or `Generated with` lines).
+- Commits are signed off (`git commit -s`) by the human author, who has read
+  and tested the change. A pull request check refuses commits without it.
+- AI assistance is disclosed everywhere, without exception: an
+  `Assisted-by: <tool>` trailer next to the sign-off in every assisted
+  commit, a `Disclosure` section in every assisted issue and pull request.
+  The tool is not an author: no `Co-Authored-By` line for it. See
+  `CONTRIBUTING.md`.
 - Never name the maintainer's employer anywhere in the repository.
 - Propose commit messages and wait for the maintainer's approval before
   committing; never push, open or comment on issues and PRs without explicit
