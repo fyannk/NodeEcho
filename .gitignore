@@ -13,3 +13,6 @@ cover.out
 *.swp
 *.swo
 .DS_Store
+
+# Testing artifacts and logs
+_*/
