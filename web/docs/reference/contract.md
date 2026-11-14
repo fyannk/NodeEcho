@@ -119,7 +119,7 @@ with an `eviction` block selects:
   still has the value.
 - A write the API server rejects, for instance annotations over the size
   limit, is skipped with a Warning Event and a metric, and retried on the next
-  change to the pod, its Node or the rules.
+  change to the pod, its Node or the rules, and otherwise every ten minutes.
 - Patches carry the pod UID as a precondition, so a pod recreated under the
   same name is never patched with its predecessor's values.
 - A pod never changes node (`spec.nodeName` is immutable). A rescheduled pod is

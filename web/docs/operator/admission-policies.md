@@ -59,6 +59,10 @@ When you remove a rule that copies a key outside that prefix, such as
 has removed it from the pods: once the key is off the list, NodeEcho may no
 longer remove it.
 
+NodeEcho tries a rejected write again every ten minutes, so the pods catch
+up by themselves after you correct the list; each attempt is counted, which
+keeps the `NodeEchoWritesRejected` alert firing until then.
+
 A write outside it is rejected for the whole rule on that pod, and reported
 as a `KeySkipped` Warning Event: `rule <name>: write rejected: ... NodeEcho
 may not change <key>`.

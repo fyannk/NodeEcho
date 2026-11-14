@@ -31,7 +31,7 @@ Check, in order:
 | --- | --- | --- |
 | `KeySkipped` … `key set by another writer` | the key already holds another value, written by someone else: the pod template, or Kubernetes' zone and region copied at binding when the Node's label changed since | remove it from the template, or use another key or a prefix |
 | `KeySkipped` … `invalid label value` | the Node value is not a valid label value | copy it as an annotation |
-| `KeySkipped` … `write rejected` | the API server refused the write: an admission policy, the annotations size limit, or no `patch` right | read the message; for the writer-scope policy, add the key to its allowed list |
+| `KeySkipped` … `write rejected` | the API server refused the write: an admission policy, the annotations size limit, or no `patch` right | read the message; for the writer-scope policy, add the key to its allowed list. NodeEcho tries again every ten minutes |
 
 ## The configuration does not apply
 
