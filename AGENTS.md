@@ -40,7 +40,7 @@ of behavior updates the contract and the site in the same change.
 | `config/` | kustomize: `default`, `rbac`, `manager`, `policy`, `prometheus`, `grafana`, `components/` |
 | `deploy/helm/nodeecho` | Helm chart |
 | `deploy/olm` | OLM bundle (CSV) and file-based catalog |
-| `hack/` | `e2e.sh`, `scale.sh`, `test-alerts.sh`, `validate-packaging.sh`, `check-go-version.sh` |
+| `hack/` | `e2e.sh`, `scale.sh`, `test-alerts.sh`, `validate-packaging.sh`, `check-go-version.sh`, `bump-go-toolchain.sh` |
 | `web/` | documentation site (Docusaurus), deployed to GitHub Pages |
 
 ## Building and testing
@@ -97,7 +97,12 @@ cd web && npm ci && npm run typecheck && npm run build
 - **Releases:** a `v*` tag publishes the multi-arch image, the OLM images and
   the chart; the tag must equal the chart's version.
 - **Dependencies:** Dependabot covers Go, GitHub Actions and Docker, not
-  `web/`. In `web/package.json`, only libraries shipped to the browser are
+  `web/`, and not the `golang` image: the Go toolchain workflow
+  (`hack/bump-go-toolchain.sh`, daily) moves `go.mod` and the Dockerfile
+  together to the latest patch release. Dependabot and toolchain pull
+  requests merge themselves once the required checks pass; CI is their
+  review. A new Go minor version stays a person's change. In
+  `web/package.json`, only libraries shipped to the browser are
   `dependencies`.
 
 ## Commits and GitHub
@@ -106,6 +111,8 @@ cd web && npm ci && npm run typecheck && npm run build
   No issue or PR numbers in commit messages.
 - Commits are signed off (`git commit -s`) by the human author, who has read
   and tested the change. A pull request check refuses commits without it.
+  Commits by bots (Dependabot, the updates App) carry no sign-off and are
+  exempt.
 - AI assistance is disclosed everywhere, without exception: an
   `Assisted-by: <tool>` trailer next to the sign-off in every assisted
   commit, a `Disclosure` section in every assisted issue and pull request.

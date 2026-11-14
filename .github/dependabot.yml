@@ -16,6 +16,10 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "build(deps)"
+    # The Go toolchain lives in go.mod too; the Go toolchain workflow
+    # (hack/bump-go-toolchain.sh) moves both, Dependabot would move one.
+    ignore:
+      - dependency-name: golang
     groups:
       go-routine-updates:
         applies-to: version-updates
@@ -46,3 +50,7 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "build(deps)"
+    # The Go toolchain lives in go.mod too; the Go toolchain workflow
+    # (hack/bump-go-toolchain.sh) moves both, Dependabot would move one.
+    ignore:
+      - dependency-name: golang

@@ -1,0 +1,77 @@
+name: Go toolchain
+
+# Follows the latest Go patch release (hack/bump-go-toolchain.sh) and opens
+# a pull request that merges itself once the required checks pass. The
+# standard library has no Dependabot alerts: this is how its security fixes
+# arrive.
+#
+# Setup (once): the updates App (see dependabot-automerge.yml), with its
+# client ID and private key also as the Actions secrets
+# UPDATES_APP_CLIENT_ID and UPDATES_APP_PRIVATE_KEY.
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-toolchain
+
+jobs:
+  bump:
+    name: Follow the latest Go patch release
+    if: github.repository == 'fyannk/NodeEcho'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ secrets.UPDATES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATES_APP_PRIVATE_KEY }}
+          permission-contents: write # push the branch, merge
+          permission-pull-requests: write # open the pull request, enable auto-merge
+
+      # Pushed with the App's token, so the pull request's checks run (a
+      # push made with GITHUB_TOKEN starts no workflow). The credentials
+      # stay for the push; no step runs code from outside the repository.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          token: ${{ steps.app.outputs.token }}
+
+      - id: bump
+        run: |
+          version=$(./hack/bump-go-toolchain.sh)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      # The App is the author: hack/check-commits.sh exempts bots from the
+      # sign-off, which certifies a person's work.
+      - if: steps.bump.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          branch="build/go-${VERSION}"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "$branch already exists"
+            exit 0
+          fi
+          id=$(gh api "/users/${SLUG}%5Bbot%5D" --jq .id)
+          git config user.name "${SLUG}[bot]"
+          git config user.email "${id}+${SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -q -a -F - <<EOF
+          build: move the Go toolchain to ${VERSION}
+
+          Go ${VERSION} is the latest patch release; patch releases carry the
+          standard library's security fixes. go.mod and the builder image
+          move together, as hack/check-go-version.sh requires.
+          EOF
+          git push -q origin "$branch"
+          url=$(gh pr create --base main --head "$branch" \
+            --title "build: move the Go toolchain to ${VERSION}" \
+            --body "Opened by the Go toolchain workflow: go.mod and the Dockerfile's builder image move to Go ${VERSION}. It merges itself once the required checks pass.")
+          gh pr merge --auto --rebase "$url"

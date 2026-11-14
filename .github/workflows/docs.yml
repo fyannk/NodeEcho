@@ -3,8 +3,10 @@ name: Docs
 on:
   push:
     branches: [main]
+  # Every pull request, not only those touching web/: the build is a
+  # required check, and a check that never runs blocks the merge. The
+  # changes job decides; a skipped build counts as passed.
   pull_request:
-    paths: [web/**, .github/workflows/docs.yml]
 
 # Restrictive at the top; only deploy publishes, and only it is granted
 # the tokens to do so. build just produces an artifact.
@@ -16,8 +18,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Documentation changed
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.diff.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name == 'pull_request'
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != pull_request ] ||
+             [ -n "$(git diff --name-only "$BASE...$HEAD" -- web .github/workflows/docs.yml)" ]; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
     name: Build documentation site
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
