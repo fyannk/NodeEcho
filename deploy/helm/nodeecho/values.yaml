@@ -91,11 +91,14 @@ policies:
     # extraPrefixes are more key prefixes to reserve, ending in "/".
     extraPrefixes: []
   # writerScope limits NodeEcho to updating the pod labels and annotations
-  # its rules write. The allowed list is computed from the rules.
+  # its rules write. The allowed list is the nodeecho.fyannk.dev/ prefix and
+  # the keys computed from the rules.
   writerScope:
     enabled: false
     # extraAllowed are more keys, or prefixes ending in "/", NodeEcho may
-    # change, for rules managed outside this chart.
+    # change, for rules managed outside this chart. When you remove a rule
+    # that copies a key outside nodeecho.fyannk.dev/, list that key here
+    # until NodeEcho has removed it from the pods.
     extraAllowed: []
 
 # pprof serves Go's profiles on this address, for instance 127.0.0.1:6060;

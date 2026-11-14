@@ -52,6 +52,13 @@ The list must cover every destination key of every rule:
   expression: "['nodeecho.fyannk.dev/', 'topology.kubernetes.io/zone', 'rack.example.org/']"
 ```
 
+The Helm chart computes the list: the `nodeecho.fyannk.dev/` prefix, always,
+then the keys of the rules in its values and `policies.writerScope.extraAllowed`.
+When you remove a rule that copies a key outside that prefix, such as
+`topology.kubernetes.io/zone`, keep the key in `extraAllowed` until NodeEcho
+has removed it from the pods: once the key is off the list, NodeEcho may no
+longer remove it.
+
 A write outside it is rejected for the whole rule on that pod, and reported
 as a `KeySkipped` Warning Event: `rule <name>: write rejected: ... NodeEcho
 may not change <key>`.

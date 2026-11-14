@@ -52,8 +52,10 @@ spec:
   validationActions: [Deny]
 {{- end }}
 {{- if .Values.policies.writerScope.enabled }}
-{{- $allowed := concat (include "nodeecho.ruleKeys" . | fromJsonArray) .Values.policies.writerScope.extraAllowed | uniq }}
-{{- if not $allowed }}{{- $allowed = list "nodeecho.fyannk.dev/" }}{{- end }}
+{{- /* NodeEcho's own prefix is always allowed, as in config/policy: the
+     keys of a rule removed from the values are still on the pods, and
+     NodeEcho has to be allowed to remove them. */}}
+{{- $allowed := concat (list "nodeecho.fyannk.dev/") (include "nodeecho.ruleKeys" . | fromJsonArray) .Values.policies.writerScope.extraAllowed | uniq }}
 ---
 # Limits NodeEcho to updating pods, never their spec, owner references or
 # finalizers, and to changing only the labels and annotations its rules
