@@ -27,6 +27,12 @@ trigger a consumer's switchover. The policy rejects creating, updating or
 removing `nodeecho.fyannk.dev/` labels and annotations, from any identity
 other than NodeEcho's ServiceAccount, including in a pod template.
 
+It matches the pod and its `status` subresource: an update of a pod's status
+can change its labels and annotations too, and controllers that may not edit
+pods often may update their status. It does not match `pods/binding`, which
+can set annotations on the pod it binds: that right belongs to schedulers,
+so give `create` on `pods/binding` to nothing else.
+
 To reserve custom keys your rules write, extend its `prefixes` variable:
 
 ```yaml

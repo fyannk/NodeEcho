@@ -216,7 +216,9 @@ directions:
 - `nodeecho-reserved-keys`: anyone able to edit a pod could forge an echoed
   value. The policy rejects creating, changing or removing
   `nodeecho.fyannk.dev/*` labels and annotations from any identity other than
-  NodeEcho's ServiceAccount.
+  NodeEcho's ServiceAccount, on the pod and through its status subresource.
+  It does not cover the binding subresource, which sets annotations when a
+  pod is bound and is the scheduler's right.
 - `nodeecho-writer-scope`: NodeEcho's own `patch` right would let it rewrite
   any pod, images included, or change the labels Services and
   NetworkPolicies select on. The policy limits its ServiceAccount to updating

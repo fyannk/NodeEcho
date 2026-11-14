@@ -1,8 +1,8 @@
 {{- $fullname := include "nodeecho.fullname" . -}}
 {{- $user := include "nodeecho.user" . -}}
 {{- if .Values.policies.reservedKeys.enabled }}
-# Rejects pod creations and updates that add, change or remove a reserved
-# label or annotation, unless NodeEcho makes them.
+# Rejects pod creations and updates, of the pod or of its status, that add,
+# change or remove a reserved label or annotation, unless NodeEcho makes them.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -16,7 +16,7 @@ spec:
       - apiGroups: [""]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [pods]
+        resources: [pods, pods/status]
   matchConditions:
     - name: not-nodeecho
       expression: request.userInfo.username != {{ $user | quote }}
