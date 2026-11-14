@@ -39,6 +39,31 @@ Without the annotation filter, the same run needed 175 MiB at steady state
   reconciled one at a time, in one queue: a cordon that arrives during that
   time waits its turn behind the pods already queued.
 
+## More than one pod at a time
+
+`--pod-workers` sets how many pods NodeEcho reconciles at the same time; the
+default is one. More workers shorten what touches many pods at once, and
+send the API server as many requests at the same time. They do not change
+how many writes are made, nor the memory.
+
+One run each of `make scale` at its default size, 5,000 pods on 50 fake
+Nodes, half of them selected, on a single-node k3d cluster:
+
+| | 1 worker | 4 workers |
+| --- | --- | --- |
+| First echo on 2,500 pods | 7.6 s | 1.1 s |
+| Cordon of every node echoed | 3.0 s | 0.3 s |
+| Rule added, every pod reconciled | 11.5 s | 4.0 s |
+| Writes over the whole run | 12,500 | 12,500 |
+| RSS after the rule change | 93 MiB | 90 MiB |
+
+These are single runs on an idle API server with no other client, so read
+them as an order of magnitude. On a busy cluster the API server's priority
+and fairness decides how much of this NodeEcho gets, and NodeEcho does not
+limit its own request rate. Raise the number when a rule change or a large
+cordon takes too long, and watch the API server while you do:
+`SCALE_WORKERS=4 make scale` measures it.
+
 ## Defaults
 
 ```yaml

@@ -70,7 +70,7 @@ func init() {
 func main() {
 	var metricsAddr, metricsCertDir, probeAddr, pprofAddr, configName, configNamespace string
 	var leaderElect, metricsSecure, showVersion, certRotation bool
-	var webhookPort int
+	var webhookPort, podWorkers int
 	var certDir, certSecret, webhookService, webhookConfig string
 	flag.StringVar(&configName, "config-name", "nodeecho", "Name of the rules ConfigMap.")
 	flag.StringVar(&configNamespace, "config-namespace", os.Getenv("POD_NAMESPACE"),
@@ -84,6 +84,8 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Address the health probes bind to.")
 	flag.StringVar(&pprofAddr, "pprof-bind-address", "",
 		"Address the pprof endpoint binds to, for instance 127.0.0.1:6060; empty disables it. Unauthenticated.")
+	flag.IntVar(&podWorkers, "pod-workers", 1,
+		"Pods reconciled at the same time. More reach the pods sooner after a change that touches many, and send the API server as many requests at once.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election, for more than one replica.")
 	flag.BoolVar(&showVersion, "version", false, "Print the version and exit.")
 	flag.IntVar(&webhookPort, "webhook-port", 0, "Port of the eviction webhook; 0 disables it.")
@@ -180,6 +182,7 @@ func main() {
 		Store:    store,
 		Recorder: mgr.GetEventRecorder("nodeecho"),
 		Resync:   resync,
+		Workers:  podWorkers,
 	}).SetupWithManager(ctx, mgr); err != nil {
 		setupLog.Error(err, "Unable to set up the pod controller")
 		os.Exit(1)

@@ -14,6 +14,7 @@
 #   SCALE_PODS      pods (default 5000), half of them selected by the rule
 #   SCALE_NODES     fake Nodes (default 50)
 #   SCALE_K3S       k3s image (default rancher/k3s:v1.36.5-k3s1)
+#   SCALE_WORKERS   --pod-workers of the measured NodeEcho (default 1)
 #   SCALE_KEEP      1 keeps the cluster
 #   E2E_NETWORK     existing Docker network for the k3d node
 #   E2E_SKIP_BUILD  1 reuses an existing image
@@ -156,6 +157,11 @@ patches:
       - op: replace
         path: /spec/variables/0/expression
         value: "['nodeecho.fyannk.dev/', 'rack.example.org/']"
+  - target: {kind: Deployment, name: nodeecho}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --pod-workers=${SCALE_WORKERS:-1}
 EOF
 k apply -k "$overlay" >/dev/null
 k rollout status -n "$SYS" deployment/nodeecho --timeout=180s >/dev/null
