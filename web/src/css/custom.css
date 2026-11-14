@@ -1,113 +1,296 @@
 /**
- * NodeEcho docs theme.
- *
- * The palette of its sibling projects' documentation (pgToolBox,
- * pgConsole): navy chrome, the mark's light blue for the second half of the
- * wordmark, and the accent blue for links. A reader moving between the
- * sites should not have to work out that they are looking at one family.
+ * NodeEcho docs theme: the fyannk design system (tokens.css, vendored next
+ * to this file and loaded before it) mapped onto Docusaurus' Infima variables. Dark first, deep
+ * green, one accent; IBM Plex Mono speaks (names, headings, navigation,
+ * code), IBM Plex Sans explains. Use the --fy-* tokens, never hex values.
  */
-
-:root {
-  /* pgConsole's --accent oklch(50% 0.15 252) and its ramp. */
-  --ifm-color-primary: #0064b5;
-  --ifm-color-primary-dark: #0052a1;
-  --ifm-color-primary-darker: #004998;
-  --ifm-color-primary-darkest: #003481;
-  --ifm-color-primary-light: #2076c9;
-  --ifm-color-primary-lighter: #3e89d7;
-  --ifm-color-primary-lightest: #67aaed;
-  --ifm-code-font-size: 95%;
-
-  /* Brand constants, used by the navbar lockup in both themes. */
-  --ne-navy: #0c3164;
-  --ne-navy-border: #072754;
-  --ne-logo-blue: #60bdeb;
-  --ne-on-navy: #f7fafd;
-  --ne-on-navy-muted: #a8c4e0;
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-mono-500-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-mono-600-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('./fonts/ibm-plex-sans-latin.woff2') format('woff2');
 }
 
-[data-theme='dark'] {
-  /* Lifted for contrast on the dark surface; same hue family. */
-  --ifm-color-primary: #67aaed;
-  --ifm-color-primary-dark: #3e89d7;
-  --ifm-color-primary-darker: #2076c9;
-  --ifm-color-primary-darkest: #0064b5;
-  --ifm-color-primary-light: #8cc2f4;
-  --ifm-color-primary-lighter: #a9d2f7;
-  --ifm-color-primary-lightest: #cfe6fb;
+/* Infima reads these in both themes; the tokens underneath switch with
+   data-theme, which Docusaurus sets on <html>. The selector has to outweigh
+   Infima's own html[data-theme='dark'], or its grey page comes back. */
+:root,
+html:root[data-theme] {
+  --ifm-color-primary: var(--fy-accent);
+  --ifm-color-primary-dark: var(--fy-accent);
+  --ifm-color-primary-darker: var(--fy-accent);
+  --ifm-color-primary-darkest: var(--fy-accent);
+  --ifm-color-primary-light: var(--fy-accent);
+  --ifm-color-primary-lighter: var(--fy-accent);
+  --ifm-color-primary-lightest: var(--fy-accent);
+
+  --ifm-background-color: var(--fy-bg);
+  --ifm-background-surface-color: var(--fy-surface);
+  --ifm-font-color-base: var(--fy-text);
+  --ifm-font-color-secondary: var(--fy-text-muted);
+  --ifm-heading-color: var(--fy-text);
+  --ifm-link-color: var(--fy-accent);
+  --ifm-link-hover-color: var(--fy-accent);
+  --ifm-color-content: var(--fy-text);
+  --ifm-color-content-secondary: var(--fy-text-muted);
+
+  --ifm-font-family-base: var(--fy-font-sans);
+  --ifm-font-family-monospace: var(--fy-font-mono);
+  --ifm-heading-font-family: var(--fy-font-mono);
+  --ifm-heading-font-weight: 600;
+  --ifm-font-weight-bold: 600;
+  --ifm-font-weight-semibold: 600;
+  --ifm-code-font-size: 90%;
+  --ifm-h1-font-size: var(--fy-text-2xl);
+  --ifm-h2-font-size: var(--fy-text-xl);
+  --ifm-h3-font-size: var(--fy-text-lg);
+  --ifm-h4-font-size: var(--fy-text-md);
+
+  /* Tight corners, 1px borders, no shadows. */
+  --ifm-global-radius: var(--fy-radius-md);
+  --ifm-code-border-radius: var(--fy-radius-sm);
+  --ifm-pre-border-radius: var(--fy-radius-md);
+  --ifm-card-border-radius: var(--fy-radius-md);
+  --ifm-button-border-radius: var(--fy-radius-md);
+  --ifm-alert-border-radius: var(--fy-radius-md);
+  --ifm-global-shadow-lw: none;
+  --ifm-global-shadow-md: none;
+  --ifm-global-shadow-tl: none;
+
+  --ifm-toc-border-color: var(--fy-border);
+  --ifm-hr-background-color: var(--fy-border);
+  --ifm-table-border-color: var(--fy-border);
+  --ifm-table-head-background: var(--fy-surface);
+  --ifm-table-stripe-background: transparent;
+  --ifm-color-emphasis-100: var(--fy-raised);
+  --ifm-color-emphasis-200: var(--fy-border);
+  --ifm-color-emphasis-300: var(--fy-border);
+  --ifm-color-emphasis-400: var(--fy-border-strong);
+  --ifm-color-emphasis-500: var(--fy-text-faint);
+  --ifm-color-emphasis-600: var(--fy-text-muted);
+  --ifm-color-emphasis-700: var(--fy-text-muted);
+  --ifm-color-emphasis-800: var(--fy-text);
+  --ifm-color-emphasis-900: var(--fy-text);
+
+  --ifm-code-background: var(--fy-raised);
+  --ifm-pre-background: var(--fy-surface);
+  --prism-background-color: var(--fy-surface);
+
+  --ifm-navbar-background-color: var(--fy-bg);
+  --ifm-navbar-link-color: var(--fy-text-muted);
+  --ifm-navbar-link-hover-color: var(--fy-text);
+  --ifm-navbar-shadow: none;
+  --ifm-footer-background-color: var(--fy-bg);
+  --ifm-footer-color: var(--fy-text-muted);
+  --ifm-footer-link-color: var(--fy-text-muted);
+  --ifm-footer-link-hover-color: var(--fy-accent);
+  --ifm-footer-title-color: var(--fy-text);
+
+  --ifm-menu-color: var(--fy-text-muted);
+  --ifm-menu-color-active: var(--fy-text);
+  --ifm-menu-color-background-active: var(--fy-accent-soft);
+  --ifm-menu-color-background-hover: var(--fy-raised);
+  --ifm-breadcrumb-color-active: var(--fy-text);
+  --ifm-breadcrumb-item-background-active: var(--fy-accent-soft);
+  --ifm-dropdown-background-color: var(--fy-raised);
+
+  --ifm-button-color: var(--fy-accent-ink);
+  --ifm-button-font-weight: 600;
+
+  /* Admonitions carry status, and status has its own colors. */
+  --ifm-color-info-dark: var(--fy-info);
+  --ifm-color-success-dark: var(--fy-ok);
+  --ifm-color-warning-dark: var(--fy-warn);
+  --ifm-color-danger-dark: var(--fy-crit);
+  --ifm-color-secondary-dark: var(--fy-border-strong);
+
+  /* Local search (docusaurus-search-local). */
+  --search-local-modal-background: var(--fy-raised);
+  --search-local-highlight-color: var(--fy-accent);
+  --search-local-hit-background: var(--fy-surface);
+  --search-local-hit-color: var(--fy-text);
+  --search-local-muted-color: var(--fy-text-muted);
+  --search-local-hit-active-color: var(--fy-accent-ink);
+  --search-local-input-active-border-color: var(--fy-accent);
 }
 
-/* Navy chrome in both themes, exactly as the console's topbar: the mark
-   sits on its own colour while the page body stays light or dark. */
+html {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Prose near 65 characters; tables and code keep the column's width. */
+.markdown > p,
+.markdown > ul,
+.markdown > ol,
+.markdown > blockquote {
+  max-width: 44rem;
+}
+
+.markdown a {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.01em;
+}
+
+/* Code: the surface with a border, whatever the Prism theme says. */
+pre,
+.prism-code,
+div[class*='codeBlockContainer'] {
+  background-color: var(--fy-surface) !important;
+  box-shadow: none !important;
+}
+
+div[class*='codeBlockContainer'],
+.markdown > pre {
+  border: 1px solid var(--fy-border);
+}
+
+code {
+  border: 1px solid var(--fy-border);
+}
+
+pre code {
+  border: 0;
+}
+
+table {
+  font-size: var(--fy-text-sm);
+}
+
+table thead th {
+  color: var(--fy-text-muted);
+  font-family: var(--fy-font-mono);
+  font-weight: 500;
+  text-align: left;
+}
+
+.theme-admonition {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-left-width: 2px;
+  color: var(--fy-text);
+}
+
+.theme-admonition-note,
+.theme-admonition-info {
+  border-left-color: var(--fy-info);
+}
+
+.theme-admonition-tip {
+  border-left-color: var(--fy-ok);
+}
+
+.theme-admonition-warning,
+.theme-admonition-caution {
+  border-left-color: var(--fy-warn);
+}
+
+.theme-admonition-danger {
+  border-left-color: var(--fy-crit);
+}
+
+/* Chrome: the page's own background, set apart by a 1px rule. */
 .navbar {
-  --ifm-navbar-background-color: var(--ne-navy);
-  --ifm-navbar-link-color: var(--ne-on-navy);
-  --ifm-navbar-link-hover-color: var(--ne-logo-blue);
-  --ifm-navbar-search-input-background-color: rgb(255 255 255 / 12%);
-  --ifm-navbar-search-input-color: var(--ne-on-navy);
-  --ifm-navbar-search-input-placeholder-color: var(--ne-on-navy-muted);
-  border-bottom: 1px solid var(--ne-navy-border);
-  color: var(--ne-on-navy);
+  border-bottom: 1px solid var(--fy-border);
 }
 
-.navbar__link--active,
-.navbar__link:hover {
-  color: var(--ne-logo-blue);
+.navbar__link,
+.menu__link,
+.table-of-contents__link,
+.breadcrumbs__link,
+.pagination-nav__link,
+.footer__title,
+.button {
+  font-family: var(--fy-font-mono);
 }
 
-/* The wordmark. It is two-tone — Node + Echo — which the navbar title
-   cannot carry as markup, so the halves are drawn as pseudo-elements and
-   the text node is collapsed rather than removed. The logo image keeps a
-   real alt so the link has a name even where pseudo-element content is
-   left out of the accessible name. */
+.navbar__link,
+.menu__link {
+  font-size: var(--fy-text-sm);
+  font-weight: 500;
+}
+
+.navbar__link--active {
+  color: var(--fy-text);
+}
+
+/* The product name, as the wordmark is set: Plex Mono 600 and the accent
+   block cursor. */
 .navbar__brand .navbar__title {
-  font-size: 0;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-
-.navbar__brand .navbar__title::before,
-.navbar__brand .navbar__title::after {
-  font-size: 1.3rem;
-}
-
-.navbar__brand .navbar__title::before {
-  color: var(--ne-on-navy);
-  content: 'Node';
+  color: var(--fy-text);
+  font-family: var(--fy-font-mono);
+  font-size: var(--fy-text-lg);
+  font-weight: 600;
 }
 
 .navbar__brand .navbar__title::after {
-  color: var(--ne-logo-blue);
-  content: 'Echo';
+  color: var(--fy-accent);
+  content: '\258D';
 }
 
 .navbar__logo {
-  height: 1.85rem;
-  margin-right: 0.55rem;
+  height: 1.75rem;
+  margin-right: var(--fy-space-3);
 }
 
-/* Dropdowns inherit the navy bar, so their own surface has to be reset
-   or the menu renders as light text on a light panel. */
-.navbar .dropdown__menu {
-  background-color: var(--ifm-background-surface-color);
+.menu__link--active:not(.menu__link--sublist) {
+  box-shadow: inset 2px 0 0 var(--fy-accent);
 }
 
-.navbar .dropdown__link {
-  color: var(--ifm-font-color-base);
+.table-of-contents__link--active {
+  color: var(--fy-accent);
 }
 
-.navbar .dropdown__link:hover {
-  color: var(--ifm-color-primary);
+.pagination-nav__link {
+  border: 1px solid var(--fy-border);
 }
 
-.navbar__toggle,
-.navbar-sidebar__brand .navbar__title::before,
-.navbar-sidebar__brand .navbar__title::after {
-  color: var(--ne-on-navy);
+.pagination-nav__link:hover {
+  border-color: var(--fy-accent);
 }
 
-.navbar-sidebar {
-  --ifm-navbar-background-color: var(--ne-navy);
+/* The primary action is the one filled thing on the page. */
+.button--primary {
+  background: var(--fy-accent);
+  border-color: var(--fy-accent);
+  color: var(--fy-accent-ink);
+}
+
+.button--primary:hover {
+  background: var(--fy-accent);
+  border-color: var(--fy-accent);
+  color: var(--fy-accent-ink);
+  filter: brightness(1.08);
+}
+
+.button--outline {
+  background: transparent;
+  border: 1px solid var(--fy-border-strong);
+  color: var(--fy-text);
+}
+
+.button--outline:hover {
+  background: var(--fy-raised);
+  border-color: var(--fy-accent);
+  color: var(--fy-text);
 }
 
 /* GitHub link: an icon-only item, so it carries its mark as a mask and
@@ -119,7 +302,7 @@
 }
 
 .navbar-github::before {
-  background-color: var(--ne-on-navy);
+  background-color: var(--fy-text-muted);
   content: '';
   display: block;
   height: 1.4rem;
@@ -130,127 +313,162 @@
 }
 
 .navbar-github:hover::before {
-  background-color: var(--ne-logo-blue);
+  background-color: var(--fy-text);
 }
 
-/* The search field sits on navy; its icon and text must follow. */
-.navbar .DocSearch-Button,
-.navbar .navbar__search-input {
-  color: var(--ne-on-navy);
+.navbar__search-input {
+  background-color: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: var(--fy-radius-sm);
+  color: var(--fy-text);
+  font-family: var(--fy-font-mono);
+  font-size: var(--fy-text-sm);
 }
 
-/* Landing page. The hero repeats the navbar lockup at scale: navy field,
-   the mark, and the two-tone wordmark. */
-.ne-hero {
-  background: linear-gradient(180deg, var(--ne-navy) 0%, #123a72 100%);
-  color: var(--ne-on-navy);
-  padding: 4rem 1rem;
+.footer {
+  border-top: 1px solid var(--fy-border);
+  font-size: var(--fy-text-sm);
 }
 
-.ne-hero__inner {
+.footer__title {
+  font-size: var(--fy-text-sm);
+  font-weight: 600;
+}
+
+/* The family wordmark, as on every fyannk page. */
+.fy-wordmark {
+  color: var(--fy-text);
+  font-family: var(--fy-font-mono);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.fy-wordmark::after {
+  color: var(--fy-accent);
+  content: '\258D';
+}
+
+.fy-wordmark:hover {
+  color: var(--fy-text);
+  text-decoration: none;
+}
+
+/* Landing page: the siblings' page head (mark, wordmark, repository, title,
+   lede), then the points as cards. */
+.ne-page {
+  margin: 0 auto;
+  max-width: 64rem;
+  padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 3vw, 2rem) var(--fy-space-12);
+}
+
+.ne-eyebrow {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 2.5rem;
-  justify-content: center;
-  margin: 0 auto;
-  max-width: 60rem;
-}
-
-.ne-hero__mark {
-  height: auto;
-  max-width: 220px;
-  width: 100%;
-}
-
-.ne-hero__copy {
-  flex: 1 1 22rem;
-}
-
-.ne-hero__title {
-  font-size: clamp(2.75rem, 7vw, 4rem);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.05;
-  margin: 0 0 0.75rem;
-}
-
-.ne-hero__title span {
-  color: var(--ne-logo-blue);
-}
-
-.ne-hero__tagline {
-  color: var(--ne-on-navy-muted);
-  font-size: 1.25rem;
-  margin: 0 0 1.75rem;
-  max-width: 32ch;
-}
-
-.ne-hero__tagline code {
-  background: rgb(255 255 255 / 12%);
-  border: none;
-  color: var(--ne-on-navy);
-}
-
-.ne-hero__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-/* The outline button sits on navy, so Infima's dark-on-light default
-   would render it nearly invisible. */
-.ne-hero__ghost.button--outline {
-  border-color: rgb(255 255 255 / 45%);
-  color: var(--ne-on-navy);
-}
-
-.ne-hero__ghost.button--outline:hover {
-  background: rgb(255 255 255 / 12%);
-  border-color: var(--ne-logo-blue);
-  color: var(--ne-on-navy);
-}
-
-.ne-main {
-  margin: 0 auto;
-  max-width: 60rem;
-  padding: 3.5rem 1rem 4.5rem;
-}
-
-.ne-lede {
-  font-size: 1.125rem;
-  margin: 0 0 2.75rem;
-}
-
-.ne-grid {
-  display: grid;
-  gap: 1.25rem;
-  grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
-}
-
-.ne-card {
-  background: var(--ifm-background-surface-color);
-  border: 1px solid var(--ifm-color-emphasis-200);
-  border-radius: 0.5rem;
-  padding: 1.5rem;
-}
-
-.ne-card h2 {
-  font-size: 1.125rem;
-  margin: 0 0 0.5rem;
-}
-
-.ne-card p {
-  color: var(--ifm-color-emphasis-800);
+  gap: var(--fy-space-2) var(--fy-space-4);
   margin: 0;
 }
 
-/* The limitations block is a statement of scope, not a warning: it uses
-   the neutral emphasis ramp rather than a status colour. */
-.ne-note {
-  background: var(--ifm-color-emphasis-100);
-  border-left: 4px solid var(--ifm-color-primary);
-  border-radius: 0.25rem;
-  margin-top: 2.75rem;
-  padding: 1.25rem 1.5rem;
+.ne-eyebrow__mark {
+  display: block;
+  height: auto;
+  width: 84px;
+}
+
+.ne-eyebrow .fy-wordmark {
+  font-size: var(--fy-text-lg);
+}
+
+.ne-eyebrow__repo {
+  color: var(--fy-text-muted);
+  font-family: var(--fy-font-mono);
+  font-size: var(--fy-text-sm);
+  font-weight: 500;
+}
+
+.ne-title {
+  font-size: clamp(var(--fy-text-2xl), 4vw, var(--fy-text-3xl));
+  line-height: 1.15;
+  margin: var(--fy-space-4) 0;
+}
+
+.ne-lede {
+  color: var(--fy-text-muted);
+  font-size: 1.12rem;
+  margin: 0 0 var(--fy-space-4);
+  max-width: 46rem;
+}
+
+.ne-independent {
+  border-left: 2px solid var(--fy-border);
+  color: var(--fy-text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 var(--fy-space-6);
+  max-width: 46rem;
+  padding-left: var(--fy-space-3);
+}
+
+.ne-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fy-space-3);
+}
+
+.ne-section {
+  border-top: 1px solid var(--fy-border);
+  margin-top: var(--fy-space-12);
+  padding-top: var(--fy-space-8);
+}
+
+.ne-section h2 {
+  font-size: var(--fy-text-xl);
+  margin: 0 0 var(--fy-space-3);
+}
+
+.ne-section > p {
+  max-width: 46rem;
+}
+
+.ne-points {
+  display: grid;
+  gap: var(--fy-space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+  list-style: none;
+  margin: var(--fy-space-4) 0 0;
+  padding: 0;
+}
+
+.ne-points li {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: var(--fy-radius-md);
+  margin: 0;
+  padding: var(--fy-space-4);
+}
+
+.ne-points strong {
+  display: block;
+  font-family: var(--fy-font-mono);
+  font-weight: 600;
+  margin-bottom: var(--fy-space-1);
+}
+
+.ne-points span {
+  color: var(--fy-text-muted);
+}
+
+/* Status: a glyph and a word with the color, never the color alone. */
+.ne-status {
+  font-family: var(--fy-font-mono);
+  font-size: var(--fy-text-sm);
+  font-weight: 500;
+}
+
+.ne-status--warn {
+  color: var(--fy-warn);
+}
+
+/* Docusaurus sets a page title at 3rem; the scale stops at 39px. */
+.markdown h1:first-child {
+  --ifm-h1-font-size: var(--fy-text-3xl);
 }

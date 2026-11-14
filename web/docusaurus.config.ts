@@ -1,13 +1,37 @@
-import {themes as prismThemes} from 'prism-react-renderer';
+import type {PrismTheme} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
+// Code in the palette: the accent for what names things, a quieter green for
+// literals, muted for comments. Status colors stay out of it: they only ever
+// mean status.
+function codeTheme(c: {text: string; muted: string; accent: string; literal: string; surface: string}): PrismTheme {
+  return {
+    plain: {color: c.text, backgroundColor: c.surface},
+    styles: [
+      {types: ['comment', 'prolog', 'doctype', 'cdata'], style: {color: c.muted, fontStyle: 'italic'}},
+      {types: ['punctuation', 'operator'], style: {color: c.muted}},
+      {
+        types: ['keyword', 'atrule', 'key', 'property', 'tag', 'selector', 'attr-name', 'function', 'builtin'],
+        style: {color: c.accent},
+      },
+      {
+        types: ['string', 'char', 'attr-value', 'number', 'boolean', 'constant', 'symbol', 'inserted'],
+        style: {color: c.literal},
+      },
+      {types: ['deleted'], style: {color: c.muted, textDecorationLine: 'line-through'}},
+    ],
+  };
+}
+const codeDark = codeTheme({text: '#e6e4d6', muted: '#9ca393', accent: '#b3bf3a', literal: '#9fc25a', surface: '#090c0a'});
+const codeLight = codeTheme({text: '#14200f', muted: '#4f5a48', accent: '#4f6b0e', literal: '#2f5a10', surface: '#fbfaf3'});
+
 const config: Config = {
   title: 'NodeEcho',
   tagline: 'Kubernetes node context, reflected onto pods',
-  favicon: 'img/logo.svg',
+  favicon: 'img/favicon.svg',
 
   // GitHub Pages for fyannk/NodeEcho. Both are case-sensitive: served
   // under /nodeecho/ every stylesheet and script 404s, which renders as
@@ -47,7 +71,8 @@ const config: Config = {
         },
         blog: false,
         theme: {
-          customCss: './src/css/custom.css',
+          // The design tokens first: custom.css maps them onto Infima.
+          customCss: ['./src/css/tokens.css', './src/css/custom.css'],
         },
       } satisfies Preset.Options,
     ],
@@ -67,7 +92,18 @@ const config: Config = {
       },
     ],
   ],
+  headTags: [
+    {
+      tagName: 'link',
+      attributes: {rel: 'icon', href: '/NodeEcho/img/favicon-32.png', sizes: '32x32', type: 'image/png'},
+    },
+    {
+      tagName: 'link',
+      attributes: {rel: 'apple-touch-icon', href: '/NodeEcho/img/apple-touch-icon.png'},
+    },
+  ],
   themeConfig: {
+    image: 'img/social-card.png',
     metadata: [
       {
         name: 'description',
@@ -75,7 +111,10 @@ const config: Config = {
           'NodeEcho is a Kubernetes controller that echoes Node facts (cordon, taints, labels, annotations) onto the pods running there, so namespace-scoped operators need no access to Nodes.',
       },
     ],
+    // Dark is the primary theme; a reader whose system asks for light gets
+    // the light tokens.
     colorMode: {
+      defaultMode: 'dark',
       respectPrefersColorScheme: true,
     },
     mermaid: {
@@ -85,11 +124,11 @@ const config: Config = {
       title: 'NodeEcho',
       logo: {
         alt: 'NodeEcho',
-        src: 'img/logo.svg',
-        // The navbar is navy in both themes, so the mark is the same file.
-        // Without srcDark, Docusaurus renders only a light-themed image and
-        // the logo disappears entirely in dark mode.
-        srcDark: 'img/logo.svg',
+        // The mark reads on dark and on light as it is, so both themes use
+        // the same file. Without srcDark, Docusaurus renders only a
+        // light-themed image and the logo disappears in dark mode.
+        src: 'img/mark.svg',
+        srcDark: 'img/mark.svg',
       },
       items: [
         {
@@ -107,21 +146,23 @@ const config: Config = {
       ],
     },
     footer: {
-      style: 'dark',
-      logo: {
-        alt: 'NodeEcho',
-        src: 'img/logo.svg',
-        srcDark: 'img/logo.svg',
-        href: 'https://github.com/fyannk/NodeEcho',
-        width: 64,
-      },
-      copyright: `Copyright © ${new Date().getFullYear()} NodeEcho contributors. Apache-2.0 licensed.`,
+      copyright: `<a class="fy-wordmark" href="https://github.com/fyannk">fyannk</a> · An independent, personal project, not affiliated with, endorsed by or sponsored by the Kubernetes project, the CloudNativePG project, or any company. · Copyright © ${new Date().getFullYear()} NodeEcho contributors, Apache-2.0.`,
       links: [
         {
           title: 'Project',
           items: [
             {label: 'GitHub', href: 'https://github.com/fyannk/NodeEcho'},
             {label: 'Contract v1', to: '/docs/reference/contract/'},
+            {label: 'Status', to: '/docs/overview/status/'},
+          ],
+        },
+        {
+          title: 'Family',
+          items: [
+            {label: 'fyannk', href: 'https://github.com/fyannk'},
+            {label: 'pgToolBox', href: 'https://fyannk.github.io/pgToolBox/'},
+            {label: 'postgres images', href: 'https://fyannk.github.io/postgres/'},
+            {label: 'pgAdmin images', href: 'https://fyannk.github.io/pgAdmin/'},
           ],
         },
         {
@@ -140,8 +181,8 @@ const config: Config = {
       ],
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: codeLight,
+      darkTheme: codeDark,
       additionalLanguages: ['bash', 'yaml', 'go', 'json'],
     },
   } satisfies Preset.ThemeConfig,
