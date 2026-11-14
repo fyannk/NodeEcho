@@ -1,5 +1,5 @@
 # The rules NodeEcho applies, see web/docs/reference/contract.md ("Configuration").
-# Without a rule NodeEcho writes nothing.
+# Without a rule NodeEcho writes nothing. Applied once, see kustomization.yaml.
 apiVersion: v1
 kind: ConfigMap
 metadata:

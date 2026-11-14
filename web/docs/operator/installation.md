@@ -106,6 +106,7 @@ watches it either way.
 ```yaml
 resources:
   - github.com/fyannk/NodeEcho/config/default?ref=<commit>
+  - github.com/fyannk/NodeEcho/config/rules?ref=<commit>     # first install only, or your own rules
   - github.com/fyannk/NodeEcho/config/policy?ref=<commit>
 components:
   - github.com/fyannk/NodeEcho/config/components/eviction-webhook?ref=<commit>
@@ -117,7 +118,8 @@ images:
 
 | Directory | Adds |
 | --- | --- |
-| `config/default` | NodeEcho in `nodeecho-system`, with its rules ConfigMap (`rules: []`) |
+| `config/default` | NodeEcho in `nodeecho-system`, without its rules: safe to apply again |
+| `config/rules` | the rules ConfigMap, `rules: []` to start with: apply it once |
 | `config/policy` | the two [admission policies](admission-policies.md) |
 | `config/components/eviction-webhook` | the [eviction webhook](eviction-webhook.md), certificate by NodeEcho |
 | `config/components/cert-manager` | after the previous one: certificate by cert-manager |
@@ -135,7 +137,13 @@ images:
 | Deployment `nodeecho` | one replica, leader election on, non-root, read-only root file system |
 | Service `nodeecho-metrics` | the HTTPS metrics endpoint, port 8443 |
 | ClusterRole `nodeecho-metrics-reader` | `GET /metrics`, to bind to your scraper |
-| ConfigMap `nodeecho` | the rules, `rules: []` to start with |
+
+The rules ConfigMap `nodeecho` is not part of `config/default`. Until it
+exists NodeEcho is not ready, and writes nothing. Either apply `config/rules`
+once, which starts with `rules: []`, or keep your own ConfigMap in your
+overlay in its place. Do not leave `config/rules` in an overlay you apply
+again once you have edited the ConfigMap by hand: it would put `rules: []`
+back, which tells NodeEcho to remove every key from every pod.
 
 The admission policies name the ServiceAccount
 `system:serviceaccount:nodeecho-system:nodeecho`: installing elsewhere means
@@ -165,7 +173,9 @@ spec:
 
 The bundle installs NodeEcho, its rules ConfigMap `nodeecho` (empty), the
 metrics Service and reader role, and the eviction webhook, whose certificate
-OLM issues. Edit the ConfigMap to add rules. The admission policies and the
+OLM issues. Edit the ConfigMap to add rules, and check it after an upgrade:
+the ConfigMap belongs to the bundle, and whether OLM puts the empty one back
+when it upgrades has not been tested. The admission policies and the
 monitoring are not part of the bundle: apply `config/policy` and
 `config/prometheus` beside it, adapting the ServiceAccount's namespace in the
 policies.
@@ -178,7 +188,9 @@ so that rolling updates complete, and it answers the eviction webhook too.
 
 ## Upgrade
 
-Apply the new manifests and image. On start, NodeEcho reconciles every pod
+Apply the new manifests and image, not the rules: with kustomize, apply
+`config/default` again and leave `config/rules` out, so that the rules stay
+as you wrote them. On start, NodeEcho reconciles every pod
 and writes only the ones that differ; an upgrade with an unchanged contract
 writes nothing.
 

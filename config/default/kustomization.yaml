@@ -1,4 +1,6 @@
-# NodeEcho in the nodeecho-system namespace, with its rules ConfigMap.
+# NodeEcho in the nodeecho-system namespace. Safe to apply again at each
+# upgrade: the rules ConfigMap is not here but in config/rules, applied once,
+# so that an upgrade never resets your rules.
 # The admission policy under config/policy is optional and applied apart.
 namespace: nodeecho-system
 resources:
