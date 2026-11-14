@@ -98,8 +98,18 @@ with an `eviction` block selects:
   autoscaler or Karpenter scale-down, any client of the eviction API. Later
   requests, such as the retries of a drain, leave the first time in place.
 - The key stays until the pod is deleted: neither the end of a drain nor a
-  rule change removes it. A pod is evicted once in its life, and a replaced
-  pod is a new object without the key.
+  rule change removes it. A replaced pod is a new object without the key.
+  The key therefore says that an eviction was requested at that time, not
+  that one is under way: with `deny` the pod is not evicted, and a drain can
+  be abandoned. A consumer compares the time with its own clock and decides
+  how old a request it still acts on.
+- The key is not proof of who asked. The webhook answers any caller that
+  reaches its port, as admission webhooks do unless the API server is set up
+  to authenticate to them; restrict that port to the API server with a
+  NetworkPolicy where the cluster's network allows it.
+- When NodeEcho cannot write the key, the request is still answered as
+  configured, and NodeEcho reports it: a Warning Event on the pod and a
+  metric.
 - A dry-run eviction (`?dryRun=All`) records nothing.
 - `eviction.response: allow` (the default) lets the eviction through;
   `deny` refuses it with HTTP 429 and `eviction.message`, as a

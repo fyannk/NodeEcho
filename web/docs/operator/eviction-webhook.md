@@ -102,6 +102,25 @@ by `kubectl apply` or `helm install`. It is expected and harmless: the leader
 replaces the content within seconds. The `cert-manager` and OLM providers
 create no empty Secret and print no warning.
 
+## Limits
+
+- **The mark says a request was received, not that an eviction is under
+  way.** It is written once and never removed or updated: with `deny` the
+  pod is not evicted, and a drain can be abandoned. A consumer should
+  compare the time in the mark with its own clock.
+- **The webhook does not know who calls it.** Like most admission webhooks
+  it answers any client that reaches its port, so a pod able to connect to
+  the `nodeecho-webhook` Service can have a selected pod marked. Where your
+  network plugin can tell the API server from other sources, restrict port
+  9443 to it with a NetworkPolicy. NodeEcho ships none, because the API
+  server's address as seen by a NetworkPolicy differs from one cluster to
+  the next.
+- **A mark that cannot be written is reported, not retried.** The request is
+  answered as configured; the pod gets an `EvictionMarkFailed` Warning Event,
+  `nodeecho_eviction_marks_failed_total` counts it and the
+  `NodeEchoEvictionMarksFailed` alert fires. The usual cause is a custom
+  `eviction.key` missing from the writer-scope policy's allowed list.
+
 ## Check it
 
 ```bash

@@ -77,6 +77,19 @@ spec:
               allowed list, or annotations over the size limit. The pods'
               KeySkipped Events give the API server's message.
             runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechowritesrejected
+        - alert: NodeEchoEvictionMarksFailed
+          expr: sum(increase(nodeecho_eviction_marks_failed_total{job="nodeecho-metrics"}[30m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: NodeEcho cannot record eviction requests on pods.
+            description: >-
+              The eviction webhook answered requests in the last 30 minutes
+              without writing the eviction mark, so a consumer waiting for it
+              sees nothing. Usually the eviction key is missing from the
+              nodeecho-writer-scope policy's allowed list. The pods'
+              EvictionMarkFailed Events give the API server's message.
+            runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoevictionmarksfailed
         - alert: NodeEchoEchoSlow
           expr: >-
             histogram_quantile(0.99, sum by (le) (rate(workqueue_queue_duration_seconds_bucket{job="nodeecho-metrics", name="pods"}[10m]))) > 60
