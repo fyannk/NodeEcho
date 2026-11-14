@@ -34,12 +34,15 @@ k3d image import nodeecho:dev -c nodeecho-demo
 
 ```bash
 kubectl apply -k config/default
+kubectl apply -k config/rules
 kubectl -n nodeecho-system set image deployment/nodeecho manager=nodeecho:dev
 kubectl -n nodeecho-system rollout status deployment/nodeecho
 ```
 
-NodeEcho runs in `nodeecho-system` with the rules ConfigMap `nodeecho`,
-which starts with `rules: []`: it is ready, and writes nothing.
+NodeEcho runs in `nodeecho-system`. `config/rules` is its rules ConfigMap
+`nodeecho`, which starts with `rules: []`: it is ready, and writes nothing.
+It is applied once, apart from `config/default`, so that applying the
+manifests again at an upgrade never resets your rules.
 
 ## 4. Write a rule
 

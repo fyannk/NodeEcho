@@ -77,8 +77,9 @@ clean: ## Remove build outputs.
 ##@ Deployment
 
 .PHONY: deploy
-deploy: ## Deploy NodeEcho into the nodeecho-system namespace.
+deploy: ## Deploy NodeEcho into the nodeecho-system namespace; the empty rules only when there are none.
 	kubectl apply -k config/default
+	kubectl get configmap nodeecho -n nodeecho-system >/dev/null 2>&1 || kubectl apply -k config/rules
 
 .PHONY: undeploy
 undeploy: ## Remove the NodeEcho deployment.

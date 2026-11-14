@@ -95,7 +95,7 @@ def strip(d):
     d["metadata"] = {k: v for k, v in d["metadata"].items() if k != "namespace"}
     return d
 for copy, source in [
-    ("deploy/olm/bundle/manifests/nodeecho-rules_v1_configmap.yaml", "config/manager/rules.yaml"),
+    ("deploy/olm/bundle/manifests/nodeecho-rules_v1_configmap.yaml", "config/rules/rules.yaml"),
     ("deploy/olm/bundle/manifests/nodeecho-metrics_v1_service.yaml", "config/manager/metrics_service.yaml"),
     ("deploy/olm/bundle/manifests/nodeecho-metrics-reader_rbac.authorization.k8s.io_v1_clusterrole.yaml",
      "config/rbac/metrics_reader_role.yaml"),
@@ -148,7 +148,13 @@ pdep = find(plain, "Deployment")["spec"]["template"]["spec"]["containers"][0]
 if "--metrics-secure=false" not in pdep["args"] or pdep["ports"][0] != {"name": "http-metrics", "containerPort": 8080}:
     problems.append("plain metrics do not switch to http-metrics on 8080")
 
-# 6. The writer-scope policy always lets NodeEcho change its own prefix,
+# 6. config/default is what an upgrade applies again: it must not carry the
+# rules ConfigMap, or it would put `rules: []` back over the user's rules and
+# NodeEcho would remove every key from every pod.
+if any(d["kind"] == "ConfigMap" and d["metadata"]["name"] == "nodeecho" for d in kust):
+    problems.append("config/default carries the rules ConfigMap: applying it again resets the rules")
+
+# 7. The writer-scope policy always lets NodeEcho change its own prefix,
 # whatever the rules write today: a rule removed from the values leaves keys
 # on the pods, and NodeEcho has to be allowed to remove them.
 def allowed(items, name):

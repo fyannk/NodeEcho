@@ -142,6 +142,7 @@ mkdir -p "$overlay"
 cat >"$overlay/kustomization.yaml" <<EOF
 resources:
   - $(realpath --relative-to="$overlay" "$ROOT")/config/default
+  - $(realpath --relative-to="$overlay" "$ROOT")/config/rules
   - $(realpath --relative-to="$overlay" "$ROOT")/config/policy
 components:
   - $(realpath --relative-to="$overlay" "$ROOT")/config/components/metrics-http

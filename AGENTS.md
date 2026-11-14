@@ -37,7 +37,7 @@ of behavior updates the contract and the site in the same change.
 | `internal/projection` | pure: a rule and a Node give the pod keys (fuzzed) |
 | `internal/controller` | rules loader, pod projector, eviction webhook, cache transforms, metrics |
 | `internal/logstyle` | a test enforcing the logging conventions on every log call |
-| `config/` | kustomize: `default`, `rbac`, `manager`, `policy`, `prometheus`, `grafana`, `components/` |
+| `config/` | kustomize: `default`, `rules`, `rbac`, `manager`, `policy`, `prometheus`, `grafana`, `components/` |
 | `deploy/helm/nodeecho` | Helm chart |
 | `deploy/olm` | OLM bundle (CSV) and file-based catalog |
 | `hack/` | `e2e.sh`, `scale.sh`, `test-alerts.sh`, `validate-packaging.sh`, `check-go-version.sh`, `bump-go-toolchain.sh` |

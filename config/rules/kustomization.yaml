@@ -1,0 +1,7 @@
+# The rules ConfigMap NodeEcho starts with: no rule, so it is ready and
+# writes nothing. Apply it once, at the first install. It is kept out of
+# config/default on purpose: applying it again would put `rules: []` back
+# over your rules, which tells NodeEcho to remove every key from every pod.
+namespace: nodeecho-system
+resources:
+  - rules.yaml
