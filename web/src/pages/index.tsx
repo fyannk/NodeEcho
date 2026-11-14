@@ -3,7 +3,7 @@ import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
-const capabilities = [
+const points = [
   {
     title: 'No Node access for your operators',
     body: 'An operator scoped to its namespace still needs to know when its pods sit on a cordoned or tainted node, or in which zone. NodeEcho writes that onto the pods, so the operator reads its own pods and nothing else.',
@@ -25,61 +25,75 @@ const capabilities = [
 export default function Home(): React.ReactElement {
   return (
     <Layout
-      title="NodeEcho"
+      title="Node facts, echoed onto pods"
       description="A Kubernetes controller that echoes Node facts onto the pods running there, so namespace-scoped operators need no access to Nodes.">
-      <header className="ne-hero">
-        <div className="ne-hero__inner">
-          <img
-            className="ne-hero__mark"
-            src={useBaseUrl('img/logo.svg')}
-            alt=""
-            width={220}
-            height={220}
-          />
-          <div className="ne-hero__copy">
-            <h1 className="ne-hero__title">
-              Node<span>Echo</span>
-            </h1>
-            <p className="ne-hero__tagline">Kubernetes node context, reflected onto pods.</p>
-            <div className="ne-hero__actions">
-              <Link className="button button--primary button--lg" to="/docs/tutorials/getting-started/">
-                Get started
-              </Link>
-              <Link className="button button--outline button--lg ne-hero__ghost" to="/docs/">
-                What it is
-              </Link>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <main className="ne-main">
-        <p className="ne-lede">
-          NodeEcho is a Kubernetes controller. It watches Nodes and writes what
-          you ask for — <code>spec.unschedulable</code>, selected taints,
-          selected labels and annotations — onto the pods running there, as pod
-          labels and annotations. CloudNativePG is the first consumer in view;
-          the contract is generic.
-        </p>
-
-        <div className="ne-grid">
-          {capabilities.map((capability) => (
-            <section className="ne-card" key={capability.title}>
-              <h2>{capability.title}</h2>
-              <p>{capability.body}</p>
-            </section>
-          ))}
-        </div>
-
-        <div className="ne-note">
-          <p>
-            <strong>Status.</strong> Contract v1 is implemented and tested on
-            a real API server and on k3d clusters, from Kubernetes 1.34 to 1.36.
-            There is no released image yet, and no consumer reads the keys
-            upstream: see <Link to="/docs/overview/status/">what is missing
-            before production</Link>.
+      <main className="ne-page">
+        <header>
+          <p className="ne-eyebrow">
+            <img
+              className="ne-eyebrow__mark"
+              src={useBaseUrl('img/mark.svg')}
+              alt=""
+              width={84}
+              height={63}
+            />
+            <a className="fy-wordmark" href="https://github.com/fyannk">
+              fyannk
+            </a>
+            <a className="ne-eyebrow__repo" href="https://github.com/fyannk/NodeEcho">
+              fyannk/NodeEcho
+            </a>
           </p>
-        </div>
+          <h1 className="ne-title">Node facts, echoed onto pods</h1>
+          <p className="ne-lede">
+            NodeEcho is a Kubernetes controller. It watches Nodes and writes
+            what you ask for — <code>spec.unschedulable</code>, selected
+            taints, selected labels and annotations — onto the pods running
+            there, as pod labels and annotations. CloudNativePG is the first
+            consumer in view; the contract is generic.
+          </p>
+          <p className="ne-independent">
+            An independent, personal project, not affiliated with, endorsed by
+            or sponsored by the Kubernetes project, the CloudNativePG project,
+            or any company.
+          </p>
+          <div className="ne-actions">
+            <Link className="button button--primary" to="/docs/tutorials/getting-started/">
+              Get started
+            </Link>
+            <Link className="button button--outline" to="/docs/">
+              What it is
+            </Link>
+            <Link className="button button--outline" to="/docs/reference/contract/">
+              Contract v1
+            </Link>
+          </div>
+        </header>
+
+        <section className="ne-section" aria-labelledby="why-title">
+          <h2 id="why-title">What it gives you</h2>
+          <ul className="ne-points">
+            {points.map((point) => (
+              <li key={point.title}>
+                <strong>{point.title}</strong>
+                <span>{point.body}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="ne-section" aria-labelledby="status-title">
+          <h2 id="status-title">Project status</h2>
+          <p>
+            <span className="ne-status ne-status--warn">▲ Pre-release</span>
+          </p>
+          <p>
+            Contract v1 is implemented and tested on a real API server and on
+            k3d clusters, from Kubernetes 1.34 to 1.36. There is no released
+            image yet, and no consumer reads the keys upstream: see{' '}
+            <Link to="/docs/overview/status/">what is missing before production</Link>.
+          </p>
+        </section>
       </main>
     </Layout>
   );

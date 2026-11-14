@@ -96,6 +96,10 @@ cd web && npm ci && npm run typecheck && npm run build
   computes the writer-scope allowed list from the rules.
 - **Releases:** a `v*` tag publishes the multi-arch image, the OLM images and
   the chart; the tag must equal the chart's version.
+- **Site and README design:** the fyannk design system shared with the
+  sibling projects (dark first, IBM Plex Mono and Sans, one accent; the
+  README follows the family template). In `web/`, use the `--fy-*` tokens of
+  `web/src/css/tokens.css`, never a hex value.
 - **Dependencies:** Dependabot covers Go, GitHub Actions and Docker, not
   `web/`, and not the `golang` image: the Go toolchain workflow
   (`hack/bump-go-toolchain.sh`, daily) moves `go.mod` and the Dockerfile

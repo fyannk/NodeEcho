@@ -132,3 +132,16 @@ npm ci
 npm start       # live preview
 npm run build   # static site in web/build
 ```
+
+A push to `main` publishes it to
+[fyannk.github.io/NodeEcho](https://fyannk.github.io/NodeEcho/). `npm run
+serve` previews the build, but answers 404 for the fonts (it redirects
+`.woff2` files as if they were pages); GitHub Pages serves them.
+
+The site follows the fyannk design system, as the sibling projects do: dark
+first, IBM Plex Mono for names, headings and code, IBM Plex Sans for prose,
+one accent. `web/src/css/tokens.css` is a copy of the design tokens and
+`custom.css` maps them onto Docusaurus; use the `--fy-*` tokens there, never
+a hex value. The mark (`web/static/img/mark.svg`, and `favicon.svg` for
+square uses) is NodeEcho's own, drawn in that palette; the Helm chart's icon
+and the OLM bundle's carry the square one.
