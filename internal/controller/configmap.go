@@ -55,6 +55,10 @@ type ConfigReconciler struct {
 	// instance loads the rules, for the eviction webhook, but only the
 	// leader runs the pod projector, so only it resyncs the pods.
 	Elected <-chan struct{}
+	// resyncPending is set when the rules changed and stays until every
+	// pod has been sent: a failed List is retried, and the retry finds the
+	// rules unchanged. One worker reconciles, so no lock.
+	resyncPending bool
 }
 
 // Reconcile reads the ConfigMap. A missing ConfigMap, a missing key or an
@@ -107,7 +111,8 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 		logger.Info("Refused rule has no valid version here, its keys stay on the pods", "rule", name)
 	}
 	rulesActive.Set(float64(len(r.Store.Rules())))
-	if !changed {
+	r.resyncPending = r.resyncPending || changed
+	if !r.resyncPending {
 		return ctrl.Result{}, nil
 	}
 	if r.Elected != nil {
@@ -116,6 +121,7 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 		default:
 			// A standby instance: the pod projector reconciles every pod when
 			// it starts, after the election.
+			r.resyncPending = false
 			logger.Info("Rules loaded", "active", len(r.Store.Rules()), "refused", len(refused))
 			return ctrl.Result{}, nil
 		}
@@ -132,6 +138,7 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 			return ctrl.Result{}, ctx.Err()
 		}
 	}
+	r.resyncPending = false
 	return ctrl.Result{}, nil
 }
 

@@ -20,6 +20,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -548,6 +549,50 @@ func TestConfigLoaderStates(t *testing.T) {
 	reconcile() // unchanged rules: no resync
 	if len(resync) != 0 {
 		t.Errorf("unchanged rules resynced %d pods", len(resync))
+	}
+}
+
+// failingList is a client whose next List fails.
+type failingList struct {
+	client.Client
+	fail bool
+}
+
+func (c *failingList) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if c.fail {
+		c.fail = false
+		return errors.New("the cache is not ready")
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
+// The rules are activated before the pods are listed. When the List fails,
+// the retry finds the rules unchanged; it must still send the pods.
+func TestRuleChangeIsResyncedAfterAFailedList(t *testing.T) {
+	if k8s == nil {
+		t.Skip("needs envtest")
+	}
+	ctx := context.Background()
+	key := types.NamespacedName{Namespace: configNS, Name: fmt.Sprintf("failed-list-%d", seq.Add(1))}
+	must(k8s.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name},
+		Data: map[string]string{ConfigKey: "version: 1\nrules:\n" + cordonRule}}))
+	must(k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: key.Name}}))
+	must(k8s.Create(ctx, newPod(key.Name, "db", "no-such-node", nil, nil)))
+
+	resync := make(chan event.GenericEvent, 10000)
+	flaky := &failingList{Client: k8s, fail: true}
+	r := &ConfigReconciler{Client: flaky, ConfigMap: key, Store: &Store{}, Resync: resync}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err == nil {
+		t.Fatal("the failed List was not returned for a retry")
+	}
+	if len(resync) != 0 {
+		t.Fatalf("%d pods sent although the List failed", len(resync))
+	}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatal(err)
+	}
+	if len(resync) == 0 {
+		t.Error("the retry found the rules unchanged and sent no pod: the rule change is lost")
 	}
 }
 
