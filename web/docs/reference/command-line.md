@@ -20,6 +20,7 @@ title: Command line
 | `--cert-secret` | `nodeecho-webhook-cert` | Secret of the rotated certificate |
 | `--webhook-service` | `nodeecho-webhook` | Service of the webhook, named in its certificate |
 | `--webhook-config` | `nodeecho-eviction` | ValidatingWebhookConfiguration receiving the CA |
+| `--pod-workers` | `1` | pods reconciled at the same time, see [Sizing](../operator/sizing.md) |
 | `--leader-elect` | `false` | leader election, for more than one replica; on in the shipped Deployment |
 | `--version` | | print the version and exit |
 | `--zap-log-level` | `info` | `info`, `error`, or a number for more detail (`1`, `2`) |

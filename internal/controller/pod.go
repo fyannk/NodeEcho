@@ -38,6 +38,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -66,6 +67,14 @@ type PodReconciler struct {
 	// RejectedRetry is how long after a write the API server rejected the
 	// pod is reconciled again; DefaultRejectedRetry when zero.
 	RejectedRetry time.Duration
+	// Workers is how many pods are reconciled at the same time; one when
+	// zero. A pod is never reconciled by two workers at once.
+	Workers int
+}
+
+// options are the controller options of the pod projector.
+func (r *PodReconciler) options() controller.Options {
+	return controller.Options{MaxConcurrentReconciles: max(r.Workers, 1)}
 }
 
 // DefaultRejectedRetry is the delay before a pod whose write the API server
@@ -406,6 +415,7 @@ func (r *PodReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) 
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("pods").
+		WithOptions(r.options()).
 		For(&corev1.Pod{}, builder.WithPredicates(podMetadataChanged)).
 		Watches(&corev1.Node{}, podsOnNode, builder.WithPredicates(nodeEchoedFieldsChanged(r.Store.CopiesAnnotations))).
 		Watches(&corev1.Namespace{}, podsInNamespace, builder.WithPredicates(predicate.LabelChangedPredicate{})).

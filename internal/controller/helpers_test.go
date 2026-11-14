@@ -422,3 +422,11 @@ func TestStoreDoesNotHoldAReleasedRule(t *testing.T) {
 		}
 	}
 }
+
+func TestPodWorkers(t *testing.T) {
+	for workers, want := range map[int]int{0: 1, 1: 1, 4: 4, -2: 1} {
+		if got := (&PodReconciler{Workers: workers}).options().MaxConcurrentReconciles; got != want {
+			t.Errorf("Workers %d reconciles %d pods at a time, want %d", workers, got, want)
+		}
+	}
+}
