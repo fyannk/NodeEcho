@@ -25,7 +25,7 @@ helm template nodeecho "$CHART" --namespace nodeecho-system >"$WORK/helm-default
 helm template nodeecho "$CHART" --namespace nodeecho-system --set fullnameOverride=nodeecho \
 	--set webhook.enabled=true --set metrics.serviceMonitor.enabled=true --set metrics.prometheusRule.enabled=true \
 	--set dashboard.enabled=true --set policies.reservedKeys.enabled=true --set policies.writerScope.enabled=true \
-	--set 'metrics.discovery={prometheus,opentelemetry}' >"$WORK/helm-full.yaml"
+	--set 'metrics.discovery={prometheus,opentelemetry}' --set webhook.failurePolicy=Fail >"$WORK/helm-full.yaml"
 helm template nodeecho "$CHART" --namespace nodeecho-system --set webhook.enabled=true \
 	--set webhook.certificates.provider=cert-manager --set metrics.secure=false >"$WORK/helm-plain.yaml"
 # Rules that write no nodeecho.fyannk.dev/ key, with the writer-scope policy.
@@ -142,6 +142,10 @@ plain = docs(work / "helm-plain.yaml")
 vwc = find(full, "ValidatingWebhookConfiguration", "nodeecho-eviction")
 if vwc and vwc["webhooks"][0]["clientConfig"]["service"]["name"] != "nodeecho-webhook":
     problems.append("the chart's webhook does not point at its Service")
+# Ignore is not a setting: with Fail, NodeEcho being down would block every
+# eviction in the cluster, its own pods' included.
+if vwc and vwc["webhooks"][0]["failurePolicy"] != "Ignore":
+    problems.append("the chart's webhook failurePolicy can be set to something else than Ignore")
 if not find(plain, "Certificate"):
     problems.append("the cert-manager variant has no Certificate")
 pdep = find(plain, "Deployment")["spec"]["template"]["spec"]["containers"][0]

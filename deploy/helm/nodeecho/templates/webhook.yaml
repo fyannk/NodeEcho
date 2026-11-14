@@ -44,7 +44,8 @@ webhooks:
         operations: [CREATE]
         resources: [pods/eviction]
         scope: Namespaced
-    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    # Not a value: NodeEcho being down must never block an eviction.
+    failurePolicy: Ignore
     matchPolicy: Equivalent
     sideEffects: NoneOnDryRun
     timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
