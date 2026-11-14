@@ -22,7 +22,7 @@ Images are published for `linux/amd64` and `linux/arm64`:
 - `ghcr.io/fyannk/nodeecho-bundle:<version>` and `ghcr.io/fyannk/nodeecho-catalog:<version>` for OLM;
 - the chart at `oci://ghcr.io/fyannk/charts/nodeecho`.
 
-No version is released yet: until then, build the image with
+The current version is 0.1.0. To build your own image instead, use
 `make docker-build IMG=<your image>`.
 
 ### Verify what you install

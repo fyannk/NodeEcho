@@ -5,8 +5,8 @@ title: Contract v1
 
 # Contract v1
 
-Status: **draft**. It is implemented and tested, but no version is released
-yet, and it may still change before the first one; see
+Status: **draft**. It is implemented, tested and shipped in version 0.1.0,
+which is not production-ready, and it may still change before 1.0; see
 [Status](../overview/status.md). This page lists what a consumer can observe
 on its pods and what it may rely on; the [design notes](../design/design.md)
 keep the reasoning.

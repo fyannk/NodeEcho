@@ -5,7 +5,7 @@ title: Status
 
 # Status
 
-**Early implementation, not production-ready.**
+**Version 0.1.0: an early implementation, not production-ready.**
 
 ## Done
 
@@ -27,11 +27,12 @@ title: Status
   OLM bundle and catalog, each tested end to end on k3d.
 - A scale measurement on fake Nodes: about 120 MiB at 20,000 pods, one write
   per pod that needs one. See [Sizing](../operator/sizing.md).
+- A first release, 0.1.0: a multi-arch image, the chart, and the OLM bundle
+  and catalog, signed and published on `ghcr.io`. See
+  [Installation](../operator/installation.md).
 
 ## Missing before production
 
-- **A release.** The pipeline is ready (multi-arch image, chart, bundle and
-  catalog on a `v*` tag), but no version has been tagged yet.
 - **A soak test.** The tests run for minutes, not hours, and do not restart
   the API server or break watches.
 - **A staging run with a consumer.** Upstream CloudNativePG does not read the

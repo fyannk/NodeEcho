@@ -8,9 +8,7 @@ title: Getting started
 This tutorial runs NodeEcho on a throwaway [k3d](https://k3d.io) cluster,
 writes one rule, and shows a cordon and a taint reaching a pod. It takes
 about five minutes and needs Docker, k3d, kubectl and a clone of the
-repository.
-
-No image is published yet, so the tutorial builds one.
+repository, for its manifests. The image comes from `ghcr.io`.
 
 ## 1. A cluster with its own kubeconfig
 
@@ -23,19 +21,12 @@ export KUBECONFIG=$(k3d kubeconfig write nodeecho-demo)
 kubectl get nodes
 ```
 
-## 2. Build and load the image
-
-```bash
-make docker-build IMG=nodeecho:dev
-k3d image import nodeecho:dev -c nodeecho-demo
-```
-
-## 3. Install NodeEcho
+## 2. Install NodeEcho
 
 ```bash
 kubectl apply -k config/default
 kubectl apply -k config/rules
-kubectl -n nodeecho-system set image deployment/nodeecho manager=nodeecho:dev
+kubectl -n nodeecho-system set image deployment/nodeecho manager=ghcr.io/fyannk/nodeecho:0.1.0
 kubectl -n nodeecho-system rollout status deployment/nodeecho
 ```
 
@@ -44,7 +35,7 @@ NodeEcho runs in `nodeecho-system`. `config/rules` is its rules ConfigMap
 It is applied once, apart from `config/default`, so that applying the
 manifests again at an upgrade never resets your rules.
 
-## 4. Write a rule
+## 3. Write a rule
 
 This rule selects the pods labelled `app=demo`, echoes the cordon and the
 `example.org/maintenance` taint, and copies the Node's hostname label:
@@ -78,7 +69,7 @@ kubectl get pod demo -o jsonpath='{.metadata.annotations}{"\n"}'
 The pod carries `kubernetes.io/hostname` as an annotation, and nothing else
 from NodeEcho: its node is healthy, so there is nothing to say.
 
-## 5. Cordon and taint the node
+## 4. Cordon and taint the node
 
 ```bash
 NODE=$(kubectl get pod demo -o jsonpath='{.spec.nodeName}')
@@ -106,7 +97,7 @@ kubectl taint node "$NODE" example.org/maintenance- other-
 kubectl get pod demo --show-labels
 ```
 
-## 6. See who wrote what
+## 5. See who wrote what
 
 Each rule writes with its own field manager, `nodeecho/<rule name>`:
 
