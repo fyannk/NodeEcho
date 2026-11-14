@@ -40,6 +40,30 @@ YAML
 helm template nodeecho "$CHART" --namespace nodeecho-system --set fullnameOverride=nodeecho \
 	-f "$WORK/rules-values.yaml" >"$WORK/helm-rules.yaml"
 kubectl kustomize config/policy >"$WORK/kustomize-policy.yaml"
+# Each option, by kustomize and by the chart, to compare them object by object.
+overlay() { # overlay <name> <component>...
+	local dir=$WORK/overlay-$1 root
+	mkdir -p "$dir"
+	root=$(realpath --relative-to="$dir" "$ROOT")
+	{
+		echo "resources: [$root/config/default]"
+		echo "components:"
+		for c in "${@:2}"; do echo "  - $root/config/components/$c"; done
+	} >"$dir/kustomization.yaml"
+	kubectl kustomize "$dir" >"$WORK/kustomize-$1.yaml"
+}
+chart() { # chart <name> <helm arguments>...
+	helm template nodeecho "$CHART" --namespace nodeecho-system --set fullnameOverride=nodeecho "${@:2}" >"$WORK/chart-$1.yaml"
+}
+overlay webhook eviction-webhook
+chart webhook --set webhook.enabled=true
+overlay http metrics-http
+chart http --set metrics.secure=false
+overlay cert-manager eviction-webhook cert-manager
+chart cert-manager --set webhook.enabled=true --set webhook.certificates.provider=cert-manager
+overlay http-cert-manager metrics-http eviction-webhook cert-manager
+chart http-cert-manager --set metrics.secure=false --set webhook.enabled=true --set webhook.certificates.provider=cert-manager
+chart policies --set policies.reservedKeys.enabled=true --set policies.writerScope.enabled=true
 
 WORK=$WORK python3 - <<'PY'
 import os, sys, pathlib, yaml
@@ -181,6 +205,98 @@ for label, items in (("kustomize", docs(work / "kustomize-policy.yaml")), ("char
         problems.append(f"the {label}'s writer-scope policy does not allow the nodeecho.fyannk.dev/ prefix: {expression}")
 if "topology.kubernetes.io/zone" not in allowed(docs(work / "helm-rules.yaml"), "nodeecho-writer-scope"):
     problems.append("the chart's writer-scope policy does not allow the keys of its rules")
+
+# 8. The chart and kustomize install the same thing, option by option: what
+# the pod runs with, what NodeEcho may do, the webhook and the policies.
+# Names of values, images and labels differ on purpose and are not compared.
+def norm(text):
+    return " ".join(str(text).split())
+
+def container(items):
+    return find(items, "Deployment", "nodeecho")["spec"]["template"]["spec"]["containers"][0]
+
+def rights(items, kind):
+    """Every (group, resource, name, verb) granted by the Roles or ClusterRoles."""
+    out = set()
+    for d in items:
+        if d["kind"] != kind or d["metadata"]["name"].endswith("-metrics-reader"):
+            continue
+        for rule in d.get("rules", []):
+            for group in rule.get("apiGroups", []):
+                for resource in rule.get("resources", []):
+                    for name in rule.get("resourceNames", ["*"]):
+                        for verb in rule["verbs"]:
+                            out.add((group, resource, name, verb))
+    return out
+
+for variant in ("webhook", "http", "cert-manager", "http-cert-manager"):
+    k = docs(work / f"kustomize-{variant}.yaml")
+    h = docs(work / f"chart-{variant}.yaml")
+    kc, hc = container(k), container(h)
+    for field in ("env", "resources", "securityContext", "livenessProbe", "readinessProbe", "ports", "volumeMounts"):
+        if kc.get(field) != hc.get(field):
+            problems.append(f"{variant}: the chart's container {field} differs from kustomize: {hc.get(field)} != {kc.get(field)}")
+    # The chart spells out defaults kustomize leaves to the binary: every
+    # argument kustomize passes must be among the chart's.
+    # The cert-manager component turns the rotation off again with a second
+    # flag, the last one winning; the chart passes neither.
+    off = ("--cert-rotation", "--cert-rotation=false") if "--cert-rotation=false" in kc["args"] else ()
+    for arg in kc["args"]:
+        if arg not in hc["args"] and arg not in off:
+            problems.append(f"{variant}: kustomize passes {arg}, the chart does not")
+    for arg in ("--metrics-secure=false", "--cert-rotation", "--webhook-port=9443"):
+        if (arg in hc["args"]) != (arg in kc["args"]) and f"{arg}=false" not in kc["args"]:
+            problems.append(f"{variant}: {arg} is passed by only one of the chart and kustomize")
+    kpod = find(k, "Deployment", "nodeecho")["spec"]["template"]["spec"]
+    hpod = find(h, "Deployment", "nodeecho")["spec"]["template"]["spec"]
+    for field in ("securityContext", "volumes", "serviceAccountName", "terminationGracePeriodSeconds"):
+        if kpod.get(field) != hpod.get(field):
+            problems.append(f"{variant}: the chart's pod {field} differs from kustomize")
+    for kind in ("ClusterRole", "Role"):
+        only_k, only_h = rights(k, kind) - rights(h, kind), rights(h, kind) - rights(k, kind)
+        if only_k or only_h:
+            problems.append(f"{variant}: {kind} rights differ: only kustomize {sorted(only_k)}, only the chart {sorted(only_h)}")
+    for name in ("nodeecho-metrics", "nodeecho-webhook"):
+        ks = [d for d in k if d["kind"] == "Service" and d["metadata"]["name"] == name]
+        hs = [d for d in h if d["kind"] == "Service" and d["metadata"]["name"] == name]
+        if bool(ks) != bool(hs) or (ks and ks[0]["spec"]["ports"] != hs[0]["spec"]["ports"]):
+            problems.append(f"{variant}: Service {name} differs between the chart and kustomize")
+    kw = [d for d in k if d["kind"] == "ValidatingWebhookConfiguration"]
+    hw = [d for d in h if d["kind"] == "ValidatingWebhookConfiguration"]
+    if bool(kw) != bool(hw):
+        problems.append(f"{variant}: only one of the chart and kustomize has the webhook configuration")
+    elif kw:
+        a, b = dict(kw[0]["webhooks"][0]), dict(hw[0]["webhooks"][0])
+        for w in (a, b):
+            w["clientConfig"] = {"service": w["clientConfig"]["service"]}
+            # An empty selector and none select the same namespaces.
+            if not w.get("namespaceSelector"):
+                w.pop("namespaceSelector", None)
+        if a != b:
+            problems.append(f"{variant}: the webhook differs between the chart and kustomize: {b} != {a}")
+
+# The policies: same matches, same expressions. The allowed and reserved
+# lists are compared as lists, the messages not at all: the chart's name
+# its own values.
+kpol, hpol = docs(work / "kustomize-policy.yaml"), docs(work / "chart-policies.yaml")
+for name in ("nodeecho-reserved-keys", "nodeecho-writer-scope"):
+    a = find(kpol, "ValidatingAdmissionPolicy", name).get("spec", {})
+    b = find(hpol, "ValidatingAdmissionPolicy", name).get("spec", {})
+    for field in ("failurePolicy", "matchConstraints", "matchConditions"):
+        if a.get(field) != b.get(field):
+            problems.append(f"{name}: {field} differs between the chart and config/policy")
+    av = {v["name"]: norm(v["expression"]) for v in a.get("variables", [])}
+    bv = {v["name"]: norm(v["expression"]) for v in b.get("variables", [])}
+    for listed in ("allowed", "prefixes"):
+        if listed in av and yaml.safe_load(av.pop(listed)) != yaml.safe_load(bv.pop(listed, "[]")):
+            problems.append(f"{name}: the default {listed} list differs between the chart and config/policy")
+    if av != bv:
+        problems.append(f"{name}: a variable differs between the chart and config/policy")
+    if [norm(v["expression"]) for v in a.get("validations", [])] != [norm(v["expression"]) for v in b.get("validations", [])]:
+        problems.append(f"{name}: a validation differs between the chart and config/policy")
+    ab = find(kpol, "ValidatingAdmissionPolicyBinding", name).get("spec")
+    if ab != find(hpol, "ValidatingAdmissionPolicyBinding", name).get("spec"):
+        problems.append(f"{name}: the binding differs between the chart and config/policy")
 
 for p in problems:
     print("FAIL", p)

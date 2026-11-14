@@ -16,7 +16,8 @@ rules:
     resources: [events]
     verbs: [create, patch]
   # The metrics endpoint asks the API server who a scraper is and whether it
-  # may GET /metrics; not needed with --metrics-secure=false.
+  # may GET /metrics; not needed with --metrics-secure=false, and removed by
+  # config/components/metrics-http, by position: keep these two rules last.
   - apiGroups: [authentication.k8s.io]
     resources: [tokenreviews]
     verbs: [create]
