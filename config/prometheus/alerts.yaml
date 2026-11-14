@@ -1,6 +1,6 @@
 # Alerts on NodeEcho. Tested by hack/test-alerts.sh (alerts_test.yaml).
-# Gauges are aggregated with max(): a standby instance runs no controller and
-# reports zeros.
+# Gauges are aggregated with max(): a standby instance loads the rules but
+# runs no pod projector, so what the projector reports stays at zero there.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

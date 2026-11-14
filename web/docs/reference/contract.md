@@ -5,9 +5,11 @@ title: Contract v1
 
 # Contract v1
 
-Status: **draft**, 2026-10-16. No implementation exists yet. This page lists
-what a consumer can observe on its pods and what it may rely on; the
-[design notes](../design/design.md) keep the reasoning.
+Status: **draft**. It is implemented and tested, but no version is released
+yet, and it may still change before the first one; see
+[Status](../overview/status.md). This page lists what a consumer can observe
+on its pods and what it may rely on; the [design notes](../design/design.md)
+keep the reasoning.
 
 ## Principles
 
@@ -76,7 +78,11 @@ key on pods.
 - A key the pod already carries at the Node's value, written by someone
   else, is left alone: no write, no co-ownership, no Event. NodeEcho then
   does not follow later Node changes for it, as for every key another writer
-  holds.
+  holds. One exception, for annotations: NodeEcho only keeps in memory the
+  annotations its rules write, so an annotation it had not kept when a rule
+  first asks for it can be applied once at the value it already has. NodeEcho
+  is then a second owner of it until the value next changes; the value on the
+  pod is never altered by this.
 - That rule is the whole treatment of `topology.kubernetes.io/zone` and
   `topology.kubernetes.io/region`, which Kubernetes 1.35 and later copies
   onto pods at binding: where Kubernetes copied them, NodeEcho writes
@@ -97,6 +103,8 @@ with an `eviction` block selects:
 - NodeEcho records the request it receives: a `kubectl drain`, a cluster
   autoscaler or Karpenter scale-down, any client of the eviction API. Later
   requests, such as the retries of a drain, leave the first time in place.
+  Requests arriving within the same instant, or on two replicas, can each be
+  recorded; the latest of those times then stands.
 - The key stays until the pod is deleted: neither the end of a drain nor a
   rule change removes it. A replaced pod is a new object without the key.
   The key therefore says that an eviction was requested at that time, not

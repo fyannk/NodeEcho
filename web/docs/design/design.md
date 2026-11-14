@@ -5,9 +5,10 @@ title: Design notes
 
 # Proposed design
 
-Status: **proposal**, 2026-10-16. Examples below are not an implemented API.
-The consumer-facing rules are in the [contract](../reference/contract.md); this page keeps
-the reasoning.
+Status: these notes were written on 2026-10-16, before the implementation,
+and are kept for the reasoning. NodeEcho now implements the
+[contract](../reference/contract.md); where an example below differs from
+it, the contract and the code are right.
 
 ## Goal
 
@@ -274,6 +275,11 @@ requires it. A normal pod-creation webhook cannot know the node that the
 scheduler will select later.
 
 ## Optional future eviction integration
+
+NodeEcho now ships an optional [eviction webhook](../operator/eviction-webhook.md),
+narrower than what this section sketches: it records on the pod when an
+eviction was requested, and allows or refuses the request as a rule says.
+The protocol with a consumer described below is not implemented.
 
 Strimzi Drain Cleaner is a useful model for an additional eviction-aware
 component. A webhook could notify a compatible consumer and defer an eviction
