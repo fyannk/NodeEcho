@@ -95,7 +95,6 @@ def strip(d):
     d["metadata"] = {k: v for k, v in d["metadata"].items() if k != "namespace"}
     return d
 for copy, source in [
-    ("deploy/olm/bundle/manifests/nodeecho-rules_v1_configmap.yaml", "config/rules/rules.yaml"),
     ("deploy/olm/bundle/manifests/nodeecho-metrics_v1_service.yaml", "config/manager/metrics_service.yaml"),
     ("deploy/olm/bundle/manifests/nodeecho-metrics-reader_rbac.authorization.k8s.io_v1_clusterrole.yaml",
      "config/rbac/metrics_reader_role.yaml"),
@@ -157,6 +156,13 @@ if "--metrics-secure=false" not in pdep["args"] or pdep["ports"][0] != {"name": 
 # NodeEcho would remove every key from every pod.
 if any(d["kind"] == "ConfigMap" and d["metadata"]["name"] == "nodeecho" for d in kust):
     problems.append("config/default carries the rules ConfigMap: applying it again resets the rules")
+
+# The same for the OLM bundle: OLM applies every object of the bundle again
+# at each upgrade, which reset the rules to `rules: []`.
+for path in sorted(pathlib.Path("deploy/olm/bundle/manifests").glob("*.yaml")):
+    d = load(path)
+    if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "nodeecho":
+        problems.append(f"{path} is the rules ConfigMap: an OLM upgrade would reset the rules")
 
 # 7. The writer-scope policy always lets NodeEcho change its own prefix,
 # whatever the rules write today: a rule removed from the values leaves keys

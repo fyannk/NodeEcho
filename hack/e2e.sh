@@ -392,9 +392,51 @@ spec:
   source: nodeecho
   sourceNamespace: olm
 EOF
+	# The rules ConfigMap is not in the bundle: until it exists NodeEcho is
+	# not ready, and the CSV does not succeed.
+	k apply -k "$ROOT/config/rules" >/dev/null
 	TIMEOUT=300 wait_for "the CSV succeeds" csv_succeeded
 	deploy_policies
 }
+
+# scenario_olm_upgrade publishes a second version of the bundle and lets OLM
+# upgrade to it: the rules must come out as they went in. OLM applies every
+# object of a bundle again at each upgrade, so a rules ConfigMap shipped in
+# the bundle was reset to `rules: []`.
+scenario_olm_upgrade() {
+	echo "- OLM upgrade keeps the rules"
+	local reg=localhost:$REGISTRY_PORT incluster=nodeecho-e2e-registry:$REGISTRY_PORT olm=$WORK/olm before
+	before=$(k get configmap nodeecho -n "$SYS" -o jsonpath='{.data.rules\.yaml}')
+	grep -q 'name: db' <<<"$before" || fail "no rule to keep before the upgrade"
+	sed -i 's/name: nodeecho.v0.1.0/name: nodeecho.v0.1.1/; s/^  version: 0.1.0/  version: 0.1.1\n  replaces: nodeecho.v0.1.0/' \
+		"$olm/bundle/manifests/nodeecho.clusterserviceversion.yaml"
+	sed -i 's/  - name: nodeecho.v0.1.0/  - name: nodeecho.v0.1.0\n  - name: nodeecho.v0.1.1\n    replaces: nodeecho.v0.1.0/' \
+		"$olm/catalog/nodeecho/catalog.yaml"
+	cat >>"$olm/catalog/nodeecho/catalog.yaml" <<NEXT
+---
+schema: olm.bundle
+package: nodeecho
+name: nodeecho.v0.1.1
+image: $incluster/nodeecho-bundle:e2e-next
+properties:
+  - type: olm.package
+    value:
+      packageName: nodeecho
+      version: 0.1.1
+NEXT
+	docker build -q -f "$olm/bundle.Dockerfile" -t "$reg/nodeecho-bundle:e2e-next" "$olm/bundle" >/dev/null
+	docker build -q -f "$olm/catalog.Dockerfile" -t "$reg/nodeecho-catalog:e2e-next" "$olm/catalog" >/dev/null
+	for i in nodeecho-bundle nodeecho-catalog; do docker push -q "$reg/$i:e2e-next" >/dev/null; done
+	k patch catalogsource nodeecho -n olm --type=merge \
+		-p "{\"spec\":{\"image\":\"$incluster/nodeecho-catalog:e2e-next\"}}" >/dev/null
+	TIMEOUT=300 wait_for "OLM upgraded to the next version" csv_is nodeecho.v0.1.1
+	[[ $(k get configmap nodeecho -n "$SYS" -o jsonpath='{.data.rules\.yaml}') == "$before" ]] ||
+		fail "the OLM upgrade changed the rules"
+	ok "the rules are as they were before the upgrade"
+	TIMEOUT=180 wait_for "NodeEcho rolled out after the upgrade" k rollout status -n "$SYS" deployment/nodeecho --timeout=5s
+	wait_for "the rules are loaded again" metric_is nodeecho_rules_active 2
+}
+csv_is() { [[ $(k get csv "$1" -n "$SYS" -o jsonpath='{.status.phase}' 2>/dev/null) == Succeeded ]]; }
 
 csv_succeeded() { [[ $(k get csv -n "$SYS" -o jsonpath='{.items[0].status.phase}') == Succeeded ]]; }
 
@@ -985,6 +1027,7 @@ run_variant() {
 	scenario_heavy_pod
 	scenario_foreign
 	scenario_metrics
+	[[ $INSTALL == olm ]] && scenario_olm_upgrade
 	if [[ $INSTALL != olm ]]; then
 		scenario_pprof
 		scenario_restart
