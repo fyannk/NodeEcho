@@ -68,11 +68,14 @@ export KUBECONFIG=$(k3d kubeconfig write nodeecho-demo)
 make docker-build IMG=nodeecho:dev
 k3d image import nodeecho:dev -c nodeecho-demo
 kubectl apply -k config/default
+kubectl apply -k config/rules
 kubectl -n nodeecho-system set image deployment/nodeecho manager=nodeecho:dev
 kubectl -n nodeecho-system rollout status deployment/nodeecho
 ```
 
-NodeEcho is then running with no rule, and writes nothing.
+NodeEcho is then running with no rule, and writes nothing. `config/rules`
+is its empty rules ConfigMap, applied once: `config/default` is what you
+apply again at an upgrade, and it leaves your rules alone.
 [Getting started](https://fyannk.github.io/NodeEcho/docs/tutorials/getting-started/)
 continues from here: one rule, then a cordon and a taint reaching a pod.
 
