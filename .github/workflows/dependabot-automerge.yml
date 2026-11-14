@@ -1,0 +1,42 @@
+name: Dependabot auto-merge
+
+# Dependabot pull requests merge themselves once the required checks pass:
+# CI is the review. The merge is queued with the updates App's token, not
+# GITHUB_TOKEN, because a push made with GITHUB_TOKEN starts no workflow,
+# and main would then go untested and its image unbuilt.
+#
+# Setup (once): the App with contents, pull requests and workflows write
+# access, installed on this repository; its client ID and private key as
+# the Dependabot secrets UPDATES_APP_CLIENT_ID and UPDATES_APP_PRIVATE_KEY;
+# "Allow auto-merge" on in the repository settings.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  automerge:
+    name: Queue the merge
+    # The pull request's author, not the actor: a maintainer re-running the
+    # job on someone else's pull request queues nothing.
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'fyannk/NodeEcho'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        with:
+          client-id: ${{ secrets.UPDATES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.UPDATES_APP_PRIVATE_KEY }}
+          permission-contents: write # merge
+          permission-pull-requests: write # enable auto-merge
+          permission-workflows: write # merge an update of .github/workflows
+
+      # Rebase: the ruleset requires a linear history. Required checks decide
+      # when the merge happens; a red check leaves the pull request open.
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --rebase "$PR_URL"

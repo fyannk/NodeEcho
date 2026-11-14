@@ -69,6 +69,11 @@ The maintainer reviews every pull request. CI must be green; the review
 looks at the contract, the tests, the documentation and the packaging.
 Expect questions rather than silent rewrites.
 
+Dependency updates are the exception: pull requests opened by Dependabot,
+and by the Go toolchain workflow for a new Go patch release, merge
+themselves once the required checks pass, without a person's review. Their
+commits are a bot's and carry no sign-off.
+
 ## Security
 
 Do not open a public issue for a vulnerability; see [SECURITY.md](SECURITY.md).

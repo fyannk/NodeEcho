@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Daily on main: updates merge on checks that ran against an older main,
+  # and a new vulnerability shows up without waiting for the next change.
+  schedule:
+    - cron: "41 4 * * *"
 
 permissions:
   contents: read
@@ -106,3 +110,44 @@ jobs:
           persist-credentials: false
       # promtool check and unit tests, in pinned containers.
       - run: make test-alerts
+
+  # What images.yml and release.yml do on main and on a tag, without
+  # publishing: an update of the actions or the Dockerfile that breaks them
+  # fails here, before the merge, not at the release.
+  release-dry-run:
+    name: Images and chart build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+      - run: cosign version
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+
+      - name: NodeEcho
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          provenance: mode=max
+          sbom: true
+          build-args: VERSION=dry-run
+      - name: OLM bundle
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: deploy/olm/bundle
+          file: deploy/olm/bundle.Dockerfile
+          push: false
+      - name: OLM catalog
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: deploy/olm/catalog
+          file: deploy/olm/catalog.Dockerfile
+          push: false
+
+      - run: helm package deploy/helm/nodeecho -d dist

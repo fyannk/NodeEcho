@@ -102,6 +102,20 @@ the reader's browser (React, MDX, Prism) are `dependencies`; everything else
 is a `devDependency`, which GitHub's default auto-triage dismisses as
 development-scoped when Dependabot alerts are on.
 
+The `golang` builder image is not Dependabot's: the toolchain is written
+twice, in `go.mod` and in the Dockerfile, and `hack/check-go-version.sh`
+refuses them apart. A daily workflow (`hack/bump-go-toolchain.sh`) moves
+both to the latest patch release of the current Go minor version, which is
+how the standard library's security fixes arrive; a new minor version is
+left to a person.
+
+Dependabot's pull requests and the toolchain's merge themselves once the
+required checks pass, CI being their review. The checks include a dry run
+of the image and chart builds, so an update that would break a release
+fails before it merges. CI also runs daily on `main`, which catches a
+combination of updates that each passed on an older `main`, and a newly
+published vulnerability.
+
 ## Contributing
 
 [CONTRIBUTING.md](https://github.com/fyannk/NodeEcho/blob/main/CONTRIBUTING.md)
