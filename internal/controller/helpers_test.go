@@ -378,3 +378,47 @@ func TestStoreAnnotationKeys(t *testing.T) {
 		t.Errorf("annotation keys = %v, want %v", got, want)
 	}
 }
+
+// A refused rule this instance never saw valid has no version to keep, so
+// its name is held and its keys stay on the pods, until the rule is valid
+// again or leaves the document.
+func TestStoreHoldsARefusedRuleItNeverSawValid(t *testing.T) {
+	broken := "- name: a\n  podSelector: {matchLabels: {app: a}}\n"
+	b := "- name: b\n  podSelector: {matchLabels: {app: b}}\n  taints: {copy: [x]}\n"
+	s := &Store{}
+	valid, refused := rulesOf(t, broken+b)
+	if changed, kept, _ := s.Set(valid, refused); !changed || len(kept) != 0 || !s.Held()["a"] || len(s.Held()) != 1 {
+		t.Fatalf("fresh store: kept=%v held=%v", kept, s.Held())
+	}
+	if changed, _, _ := s.Set(valid, refused); changed {
+		t.Error("the same document changed the store")
+	}
+	// Dropped from the document: no longer held, and the pods are resynced.
+	valid, refused = rulesOf(t, b)
+	if changed, _, _ := s.Set(valid, refused); !changed || len(s.Held()) != 0 {
+		t.Errorf("dropped rule: changed=%v held=%v", changed, s.Held())
+	}
+	// A rule that ran and is refused keeps its version: nothing to hold.
+	valid, refused = rulesOf(t, "- name: a\n  podSelector: {matchLabels: {app: a}}\n  unschedulable: {}\n"+b)
+	_, _, _ = s.Set(valid, refused)
+	valid, refused = rulesOf(t, broken+b)
+	if _, kept, _ := s.Set(valid, refused); !slices.Equal(kept, []string{"a"}) || len(s.Held()) != 0 {
+		t.Errorf("running rule: kept=%v held=%v", kept, s.Held())
+	}
+}
+
+// A refused rule whose key a valid rule took over is cleaned up, and stays
+// so when the same document is loaded again.
+func TestStoreDoesNotHoldAReleasedRule(t *testing.T) {
+	s := &Store{}
+	valid, refused := rulesOf(t, "- name: a\n  podSelector: {matchLabels: {app: a}}\n  unschedulable: {}\n")
+	_, _, _ = s.Set(valid, refused)
+	taken := "- name: a\n  podSelector: {}\n" +
+		"- name: b\n  podSelector: {matchLabels: {app: b}}\n  unschedulable: {}\n"
+	for range 2 {
+		valid, refused = rulesOf(t, taken)
+		if _, kept, _ := s.Set(valid, refused); len(kept) != 0 || len(s.Held()) != 0 {
+			t.Errorf("released rule: kept=%v held=%v", kept, s.Held())
+		}
+	}
+}

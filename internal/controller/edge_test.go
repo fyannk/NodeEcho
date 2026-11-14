@@ -283,6 +283,31 @@ func TestNothingIsWrittenBeforeTheFirstConfiguration(t *testing.T) {
 	}
 }
 
+// An instance that starts, or takes over, while a rule is refused never saw
+// it valid: it must leave the rule's keys on the pods, as the instance that
+// was running when the typo was made does.
+func TestRefusedRuleKeepsItsKeysAfterARestart(t *testing.T) {
+	setRules(t, cordonRule)
+	f := newFixture(t, map[string]string{"app": "db"}, nil)
+	f.updateNode(t, func(n *corev1.Node) { n.Spec.Unschedulable = true })
+	eventually(t, "echoed", func() bool { return cordoned(getPod(t, f.ns, "db")) })
+
+	// The same rule with its block lost to a typo, loaded by a new instance.
+	valid, refused := rulesOf(t, "- name: cordon\n  podSelector: {matchLabels: {app: db}}\n")
+	restarted := &Store{}
+	if _, _, err := restarted.Set(valid, refused); err != nil {
+		t.Fatal(err)
+	}
+	fresh := &PodReconciler{Client: k8s, Store: restarted}
+	before := getPod(t, f.ns, "db").ResourceVersion
+	if _, err := fresh.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(f.pod)}); err != nil {
+		t.Fatal(err)
+	}
+	if p := getPod(t, f.ns, "db"); p.ResourceVersion != before || !cordoned(p) {
+		t.Errorf("a restarted instance removed the keys of a refused rule")
+	}
+}
+
 func TestManyPodsOnOneNode(t *testing.T) {
 	setRules(t, cordonRule)
 	f := newFixture(t, map[string]string{"app": "db"}, nil)

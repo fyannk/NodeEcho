@@ -110,7 +110,11 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		errs = append(errs, r.sync(ctx, pod, rule.Name, rule.FieldManager(), desired))
 	}
 
-	// Field managers of rules that no longer exist.
+	// Field managers of rules that no longer exist. A refused rule still
+	// exists: without a version to run, its keys are left as they are.
+	for name := range r.Store.Held() {
+		active[fieldManagerPrefix+name] = true
+	}
 	for _, m := range pod.ManagedFields {
 		if strings.HasPrefix(m.Manager, fieldManagerPrefix) && m.Operation == "Apply" && !active[m.Manager] {
 			active[m.Manager] = true

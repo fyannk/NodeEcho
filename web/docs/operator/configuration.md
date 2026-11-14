@@ -118,7 +118,11 @@ A refused rule is logged and counted; the others keep running.
   `eviction.message` with `allow`.
 
 A refused rule that was already running keeps its last valid version, so a
-typo does not strip its keys from every pod.
+typo does not strip its keys from every pod. After a restart or a change of
+leader NodeEcho no longer has that version: it then leaves the rule's keys on
+the pods untouched, which means they stop following the Node, until you fix
+the rule or remove it. Fix a refused rule soon; `nodeecho_rules_refused` and
+the `NodeEchoRulesRefused` alert report it.
 
 The whole document is refused, and the last valid configuration kept, for an
 unknown `version`, a missing `rules` field, an unknown field or a value of
