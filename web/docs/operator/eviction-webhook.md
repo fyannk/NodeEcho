@@ -73,6 +73,13 @@ webhook:
     provider: self            # or cert-manager
 ```
 
+With `self`, the chart reads the certificate's Secret from the cluster to
+keep what NodeEcho wrote in it. A tool that renders the chart without access
+to the cluster, as `helm template` does, renders that Secret empty, and
+applying it removes the certificate until NodeEcho issues a new one; the
+webhook lets evictions through meanwhile. If you deploy that way, use
+`provider: cert-manager`.
+
 ### With OLM
 
 The bundle declares the webhook; OLM issues its certificate. Nothing to do.

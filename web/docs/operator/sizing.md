@@ -35,7 +35,9 @@ Without the annotation filter, the same run needed 175 MiB at steady state
   writes nothing.
 - Cordoning all 200 nodes at once reaches the 10,000 selected pods in 20 s;
   one node with about 100 pods is echoed in about 0.2 s.
-- A rule change reconciles every pod: about 50 s at 20,000 pods.
+- A rule change reconciles every pod: about 50 s at 20,000 pods. Pods are
+  reconciled one at a time, in one queue: a cordon that arrives during that
+  time waits its turn behind the pods already queued.
 
 ## Defaults
 

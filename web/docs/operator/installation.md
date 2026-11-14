@@ -5,9 +5,10 @@ title: Installation
 
 # Installation
 
-Three install paths say the same thing, and `make validate-packaging` checks
-they keep doing so: kustomize manifests, a Helm chart, and an OLM bundle and
-catalog.
+Three install paths: kustomize manifests, a Helm chart, and an OLM bundle and
+catalog. `make validate-packaging` checks that their versions, permissions,
+ports, environment and copied files agree. They do not offer the same
+options: the table and the sections below say what each one installs.
 
 | Path | Best for | Options |
 | --- | --- | --- |
