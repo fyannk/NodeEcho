@@ -73,8 +73,8 @@ webhook:
   # request and answers it as the rule says.
   enabled: false
   port: 9443
-  # failurePolicy Ignore never blocks an eviction while NodeEcho is down.
-  failurePolicy: Ignore
+  # The webhook's failurePolicy is Ignore and cannot be changed: NodeEcho
+  # being down never blocks an eviction.
   timeoutSeconds: 5
   # namespaceSelector narrows the namespaces whose evictions are sent.
   namespaceSelector: {}
