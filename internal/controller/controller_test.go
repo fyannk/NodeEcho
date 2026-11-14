@@ -58,7 +58,7 @@ const (
 )
 
 var (
-	k8s   client.Client
+	k8s   client.WithWatch
 	store *Store
 	seq   atomic.Int32
 )
@@ -113,7 +113,7 @@ func run(m *testing.M, cfg *rest.Config) int {
 		}
 	}()
 
-	k8s, err = client.New(cfg, client.Options{})
+	k8s, err = client.NewWithWatch(cfg, client.Options{})
 	if err != nil {
 		panic(err)
 	}
