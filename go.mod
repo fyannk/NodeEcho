@@ -2,7 +2,7 @@ module github.com/fyannk/nodeecho
 
 go 1.26.6
 
-toolchain go1.27.2
+toolchain go1.27.4
 
 require (
 	github.com/go-logr/logr v1.4.4
