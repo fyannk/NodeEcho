@@ -138,6 +138,8 @@ alert.
 ### NodeEchoWritesRejected
 
 **Warning.** The API server rejected writes of a rule in the last 30 minutes.
+NodeEcho tries each rejected pod again every ten minutes, so the alert stays
+until the cause is gone.
 
 Usually a destination key missing from the `nodeecho-writer-scope` policy's
 allowed list, or a pod over the annotations size limit. The `KeySkipped`

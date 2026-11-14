@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -61,7 +62,17 @@ type PodReconciler struct {
 	Recorder events.EventRecorder
 	// Resync delivers the pods to reconcile after a rule change.
 	Resync <-chan event.GenericEvent
+	// RejectedRetry is how long after a write the API server rejected the
+	// pod is reconciled again; DefaultRejectedRetry when zero.
+	RejectedRetry time.Duration
 }
+
+// DefaultRejectedRetry is the delay before a pod whose write the API server
+// rejected is tried again. What fixes a rejection, a corrected admission
+// policy or a shorter annotation elsewhere on the pod, sends NodeEcho no
+// event, so without a retry the pod would stay wrong until something else
+// touched it. Slow, because each retry is a request the API server refuses.
+const DefaultRejectedRetry = 10 * time.Minute
 
 // Reconcile brings one pod in line with every rule.
 func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -94,11 +105,19 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	var errs []error
+	rejected := false
 	active := map[string]bool{}
 	rules := r.Store.Rules() // one snapshot: Set may swap the rules meanwhile
 	for i := range rules {
+		active[rules[i].FieldManager()] = true
+	}
+	// A refused rule still exists: without a version to run, its keys are
+	// left as they are.
+	for name := range r.Store.Held() {
+		active[fieldManagerPrefix+name] = true
+	}
+	for i := range rules {
 		rule := &rules[i]
-		active[rule.FieldManager()] = true
 		desired := projection.Result{}
 		if node != nil && inScope(rule, ns, pod, node) {
 			var err error
@@ -107,21 +126,31 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 				continue
 			}
 		}
-		errs = append(errs, r.sync(ctx, pod, rule.Name, rule.FieldManager(), desired))
+		refused, err := r.sync(ctx, pod, rule.Name, rule.FieldManager(), desired)
+		rejected = rejected || refused
+		errs = append(errs, err)
 	}
 
-	// Field managers of rules that no longer exist. A refused rule still
-	// exists: without a version to run, its keys are left as they are.
-	for name := range r.Store.Held() {
-		active[fieldManagerPrefix+name] = true
-	}
+	// Field managers of rules that no longer exist.
 	for _, m := range pod.ManagedFields {
 		if strings.HasPrefix(m.Manager, fieldManagerPrefix) && m.Operation == "Apply" && !active[m.Manager] {
 			active[m.Manager] = true
-			errs = append(errs, r.sync(ctx, pod, removedRule, m.Manager, projection.Result{}))
+			refused, err := r.sync(ctx, pod, removedRule, m.Manager, projection.Result{})
+			rejected = rejected || refused
+			errs = append(errs, err)
 		}
 	}
-	return ctrl.Result{}, errors.Join(errs...)
+	if err := errors.Join(errs...); err != nil {
+		return ctrl.Result{}, err
+	}
+	if rejected {
+		retry := r.RejectedRetry
+		if retry == 0 {
+			retry = DefaultRejectedRetry
+		}
+		return ctrl.Result{RequeueAfter: retry}, nil
+	}
+	return ctrl.Result{}, nil
 }
 
 func inScope(rule *Rule, ns *corev1.Namespace, pod *corev1.Pod, node *corev1.Node) bool {
@@ -136,8 +165,9 @@ func inScope(rule *Rule, ns *corev1.Namespace, pod *corev1.Pod, node *corev1.Nod
 const removedRule = "(removed)"
 
 // sync applies the desired keys of one field manager, skipping the keys
-// another writer owns, and writes nothing when the pod already matches.
-func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager string, desired projection.Result) error {
+// another writer owns, and writes nothing when the pod already matches. It
+// reports whether the API server rejected the write.
+func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager string, desired projection.Result) (rejected bool, err error) {
 	for _, s := range desired.Skipped {
 		r.skip(ctx, pod, rule, s.Key, "invalid-value", s.Reason)
 	}
@@ -149,7 +179,7 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 	for attempt := 0; ; attempt++ {
 		// After a conflict the pod object is stale, so apply anyway.
 		if !retry && upToDate(wantLabels, pod.Labels, ownedLabels) && upToDate(wantAnnotations, pod.Annotations, ownedAnnotations) {
-			return nil
+			return false, nil
 		}
 		ac := corev1ac.Pod(pod.Name, pod.Namespace).WithUID(pod.UID)
 		if len(wantLabels) > 0 {
@@ -163,24 +193,24 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 		case err == nil:
 			podWrites.WithLabelValues(rule, "ok").Inc()
 			log.FromContext(ctx).V(1).Info("Pod updated", "rule", rule, "labels", wantLabels, "annotations", wantAnnotations)
-			return nil
+			return false, nil
 		case podGone(err):
 			podWrites.WithLabelValues(rule, "gone").Inc()
-			return nil // the pod was deleted or replaced; the new one has its own event
+			return false, nil // the pod was deleted or replaced; the new one has its own event
 		case apierrors.IsInvalid(err), apierrors.IsForbidden(err):
 			// The pod refuses the write, for instance annotations over the
-			// size limit or no patch right in its namespace: retrying cannot
-			// help until something changes, which brings a new event.
+			// size limit or a key off the writer-scope policy's list:
+			// retrying at once cannot help, so the pod comes back later.
 			podWrites.WithLabelValues(rule, "rejected").Inc()
 			keysSkipped.WithLabelValues(rule, "rejected").Inc()
 			log.FromContext(ctx).Info("Write rejected by the API server", "rule", rule, "error", err.Error())
 			r.Recorder.Eventf(pod, nil, corev1.EventTypeWarning, ReasonKeySkipped, "Echo", "rule %s: write rejected: %v", rule, err)
-			return nil
+			return true, nil
 		case apierrors.IsConflict(err) && attempt < 3:
 			podWrites.WithLabelValues(rule, "conflict").Inc()
 			keys := conflictingKeys(err)
 			if len(keys) == 0 {
-				return err
+				return false, err
 			}
 			for _, k := range keys {
 				if _, ok := wantLabels[k.key]; ok && k.labels {
@@ -195,7 +225,7 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 			retry = true
 		default:
 			podWrites.WithLabelValues(rule, "error").Inc()
-			return fmt.Errorf("applying rule %s to pod %s/%s: %w", rule, pod.Namespace, pod.Name, err)
+			return false, fmt.Errorf("applying rule %s to pod %s/%s: %w", rule, pod.Namespace, pod.Name, err)
 		}
 	}
 }

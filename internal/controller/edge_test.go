@@ -351,7 +351,7 @@ func TestApplyConflictSkipsTheKeyAndStillCleansUp(t *testing.T) {
 
 	rec := events.NewFakeRecorder(10)
 	r := &PodReconciler{Client: k8s, Recorder: rec}
-	if err := r.sync(ctx, snapshot, "test", manager, projection.Result{Labels: map[string]string{rack: "mine"}}); err != nil {
+	if _, err := r.sync(ctx, snapshot, "test", manager, projection.Result{Labels: map[string]string{rack: "mine"}}); err != nil {
 		t.Fatal(err)
 	}
 	p := getPod(t, f.ns, "db")
@@ -438,7 +438,9 @@ func TestSucceededPodIsStillUpdated(t *testing.T) {
 	eventually(t, "succeeded pod echoed", func() bool { return cordoned(getPod(t, f.ns, "db")) })
 }
 
-func TestRejectedWriteIsSkippedNotRetried(t *testing.T) {
+// What fixes a rejected write, a corrected admission policy or less on the
+// pod, sends NodeEcho no event: the pod comes back by itself, later.
+func TestRejectedWriteIsSkippedAndRetriedLater(t *testing.T) {
 	const big = "rack.example.org/inventory"
 	setRules(t, `- name: inventory
   podSelector: {matchLabels: {app: db}}
@@ -452,8 +454,12 @@ func TestRejectedWriteIsSkippedNotRetried(t *testing.T) {
 
 	rec := events.NewFakeRecorder(10)
 	r := &PodReconciler{Client: k8s, Store: store, Recorder: rec}
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: f.ns, Name: "full"}}); err != nil {
-		t.Fatalf("a rejected write must not be retried: %v", err)
+	result, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: f.ns, Name: "full"}})
+	if err != nil {
+		t.Fatalf("a rejected write must not be retried with backoff: %v", err)
+	}
+	if result.RequeueAfter != DefaultRejectedRetry {
+		t.Errorf("a rejected write comes back after %v, want %v", result.RequeueAfter, DefaultRejectedRetry)
 	}
 	select {
 	case e := <-rec.Events:
@@ -533,7 +539,7 @@ func TestWriteToADeletedPodIsNotAnError(t *testing.T) {
 		return apierrors.IsNotFound(k8s.Get(ctx, client.ObjectKeyFromObject(snapshot), &corev1.Pod{}))
 	})
 	r := &PodReconciler{Client: k8s, Recorder: events.NewFakeRecorder(10)}
-	if err := r.sync(ctx, snapshot, "test", "test/gone", projection.Result{Labels: map[string]string{uKey: "true"}}); err != nil {
+	if _, err := r.sync(ctx, snapshot, "test", "test/gone", projection.Result{Labels: map[string]string{uKey: "true"}}); err != nil {
 		t.Fatalf("writing to a deleted pod: %v", err)
 	}
 }
