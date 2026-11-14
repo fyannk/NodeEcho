@@ -103,6 +103,9 @@ func (r *ConfigReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.
 	for _, name := range kept {
 		logger.Info("Refused rule keeps its last valid version", "rule", name)
 	}
+	for name := range r.Store.Held() {
+		logger.Info("Refused rule has no valid version here, its keys stay on the pods", "rule", name)
+	}
 	rulesActive.Set(float64(len(r.Store.Rules())))
 	if !changed {
 		return ctrl.Result{}, nil

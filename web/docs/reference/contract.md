@@ -192,7 +192,10 @@ running, when:
 
 A refused rule whose name was running keeps its last valid version, so that a
 typo does not remove its keys from every pod, unless a valid rule now uses its
-`unschedulable.key`, `taints.key` or `eviction.key`.
+`unschedulable.key`, `taints.key` or `eviction.key`. An instance that starts
+or takes over while the rule is refused has no version to run: it leaves the
+rule's keys on the pods as they are, no longer following the Node, until the
+rule is valid again or is removed from the configuration.
 
 An unknown `version`, a missing `rules` field, a document that does not
 parse (including an unknown field or a value of the wrong type in any rule),

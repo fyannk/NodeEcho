@@ -21,6 +21,7 @@ SPDX-License-Identifier: Apache-2.0
 package controller
 
 import (
+	"maps"
 	"reflect"
 	"slices"
 	"sync"
@@ -72,6 +73,10 @@ type Store struct {
 	mu     sync.RWMutex
 	loaded bool
 	rules  []Rule
+	// held are the names of refused rules with no version to run: their
+	// keys stay on the pods. released are the refused names whose keys a
+	// valid rule took over, which are cleaned up instead.
+	held, released map[string]bool
 	// annotationKeys are the pod annotation keys the rules write: the only
 	// pod annotations the cache keeps.
 	annotationKeys atomic.Pointer[map[string]bool]
@@ -100,6 +105,16 @@ func (s *Store) Rules() []Rule {
 	return s.rules
 }
 
+// Held returns the names of the refused rules that have no version to run,
+// because this instance never saw them valid: it started, or took over,
+// after the mistake. Their keys are left on the pods, as a refused rule that
+// was running keeps its last version. The map must not be modified.
+func (s *Store) Held() map[string]bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.held
+}
+
 // CopiesAnnotations reports whether an active rule copies Node annotations.
 func (s *Store) CopiesAnnotations() bool {
 	return slices.ContainsFunc(s.Rules(), func(r Rule) bool { return r.Annotations != nil })
@@ -108,8 +123,9 @@ func (s *Store) CopiesAnnotations() bool {
 // Set replaces the active rules with valid. A refused rule whose name was
 // active keeps its last valid version, so that a typo in a running rule does
 // not remove its keys from every pod, unless a valid rule now uses one of its
-// echo keys; it returns the names kept that way. It reports whether the
-// active rules changed.
+// echo keys; it returns the names kept that way. A refused rule this
+// instance never saw valid has no version to keep: its name is held, see
+// Held. It reports whether the active rules or the held names changed.
 func (s *Store) Set(valid []config.Rule, refused []config.RuleError) (changed bool, kept []string, err error) {
 	next := make([]Rule, 0, len(valid))
 	names := map[string]bool{}
@@ -132,16 +148,34 @@ func (s *Store) Set(valid []config.Rule, refused []config.RuleError) (changed bo
 	for _, e := range refused {
 		refusedNames[e.Name] = true
 	}
+	released := map[string]bool{}
 	for _, prev := range s.rules {
-		if refusedNames[prev.Name] && !names[prev.Name] && !slices.ContainsFunc(prev.EchoKeys(), func(k string) bool { return echoKeys[k] }) {
-			next = append(next, prev)
-			names[prev.Name] = true
-			kept = append(kept, prev.Name)
+		if !refusedNames[prev.Name] || names[prev.Name] {
+			continue
+		}
+		if slices.ContainsFunc(prev.EchoKeys(), func(k string) bool { return echoKeys[k] }) {
+			released[prev.Name] = true
+			continue
+		}
+		next = append(next, prev)
+		names[prev.Name] = true
+		kept = append(kept, prev.Name)
+	}
+	held := map[string]bool{}
+	for name := range refusedNames {
+		switch {
+		case name == "" || names[name]:
+		case released[name] || s.released[name]:
+			released[name] = true
+		default:
+			held[name] = true
 		}
 	}
 
-	changed = !s.loaded || !sameRules(s.rules, next)
+	changed = !s.loaded || !sameRules(s.rules, next) || !maps.Equal(s.held, held)
 	s.rules = next
+	s.held = held
+	s.released = released
 	s.loaded = true
 	keys := map[string]bool{}
 	for i := range next {
