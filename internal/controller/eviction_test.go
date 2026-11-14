@@ -20,15 +20,21 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/fyannk/nodeecho/internal/config"
@@ -150,5 +156,49 @@ func TestEvictionPassesThrough(t *testing.T) {
 	must(k8s.Create(ctx, newPod(f.ns, "selected", f.node.Name, map[string]string{"app": "db"}, nil)))
 	if resp := unloaded.Handle(ctx, evictionRequest(f.ns, "selected", false)); !resp.Allowed {
 		t.Error("before a configuration is loaded, every eviction must pass")
+	}
+}
+
+// refusingApply is a client whose server-side applies the API server
+// refuses, as the writer-scope policy does for a key off its list.
+type refusingApply struct{ client.Client }
+
+func (refusingApply) Apply(context.Context, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+	return apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "db", errors.New("NodeEcho may not change example.org/evicted"))
+}
+
+func marksFailed(t *testing.T) float64 {
+	t.Helper()
+	m := &dto.Metric{}
+	if err := evictionMarksFailed.Write(m); err != nil {
+		t.Fatal(err)
+	}
+	return m.GetCounter().GetValue()
+}
+
+// A mark that cannot be written does not change the answer, and it is not
+// silent: a Warning Event on the pod and a counter say so.
+func TestEvictionMarkFailureIsReported(t *testing.T) {
+	setRules(t, `- name: hold
+  podSelector: {matchLabels: {app: db}}
+  eviction: {key: example.org/evicted, response: deny, message: "switch over first"}
+`)
+	f := newFixture(t, map[string]string{"app": "db"}, nil)
+	w, rec := evictionWebhook(time.Date(2026, 10, 16, 10, 0, 0, 0, time.UTC))
+	w.Client = refusingApply{k8s}
+	before := marksFailed(t)
+
+	resp := w.Handle(context.Background(), evictionRequest(f.ns, "db", false))
+	if resp.Allowed || resp.Result.Code != http.StatusTooManyRequests {
+		t.Fatalf("response = allowed %v, %+v; want the configured refusal", resp.Allowed, resp.Result)
+	}
+	if got := marksFailed(t) - before; got != 1 {
+		t.Errorf("nodeecho_eviction_marks_failed_total moved by %v, want 1", got)
+	}
+	if e := <-rec.Events; !strings.Contains(e, ReasonEvictionMarkFailed) || !strings.Contains(e, "may not change example.org/evicted") {
+		t.Errorf("first event = %q, want the mark failure", e)
+	}
+	if _, ok := getPod(t, f.ns, "db").Annotations["example.org/evicted"]; ok {
+		t.Error("the pod is marked although the write was refused")
 	}
 }

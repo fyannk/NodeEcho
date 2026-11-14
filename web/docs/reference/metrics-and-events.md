@@ -22,6 +22,7 @@ standard controller-runtime, client-go and Go runtime metrics.
 | `nodeecho_keys_skipped_total` | counter | `rule`, `reason` | configured keys not written on a pod |
 | `nodeecho_pod_writes_total` | counter | `rule`, `result` | server-side apply requests sent to pods |
 | `nodeecho_evictions_total` | counter | `rule`, `response` | eviction requests for pods a rule with an `eviction` block selects; `response` is `allow` or `deny` |
+| `nodeecho_eviction_marks_failed_total` | counter | | eviction requests answered but not recorded on the pod |
 
 `reason` is one of:
 
@@ -55,6 +56,7 @@ Warning Events on the pod, from `nodeecho`, through the `events.k8s.io` API:
 | `KeySkipped` | `rule <name>: key <key> not written: <why>`, or `rule <name>: write rejected: <API error>` |
 | `EvictionRequested` (Normal) | `rule <name>: eviction request received` |
 | `EvictionRefused` | `rule <name>: eviction request refused: <message>` |
+| `EvictionMarkFailed` | `rule <name>: eviction request not recorded on the pod: <API error>` |
 
 ## Probes
 

@@ -56,6 +56,12 @@ var (
 		Name: "nodeecho_evictions_total",
 		Help: "Eviction requests for pods selected by a rule with an eviction block, by rule and response.",
 	}, []string{"rule", "response"})
+	// No label: the alert on it needs the series to exist before the first
+	// failure, and a labelled counter has none until then.
+	evictionMarksFailed = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "nodeecho_eviction_marks_failed_total",
+		Help: "Eviction requests NodeEcho answered but could not record on the pod.",
+	})
 	podWrites = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "nodeecho_pod_writes_total",
 		Help: "Server-side apply requests sent to pods, by rule and result.",
@@ -64,7 +70,7 @@ var (
 
 func init() {
 	metrics.Registry.MustRegister(buildInfo, configLoads, configLastValid, configValid, rulesActive, rulesRefused,
-		keysSkipped, podWrites, evictions)
+		keysSkipped, podWrites, evictions, evictionMarksFailed)
 }
 
 // SetBuildInfo publishes nodeecho_build_info.

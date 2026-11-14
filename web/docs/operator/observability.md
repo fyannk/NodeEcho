@@ -147,6 +147,17 @@ Events on the pods, and the log line `Write rejected by the API server`,
 give the API server's message. See
 [Admission policies](admission-policies.md#nodeechos-own-scope).
 
+### NodeEchoEvictionMarksFailed
+
+**Warning.** The eviction webhook answered requests in the last 30 minutes
+without writing the eviction mark on the pod.
+
+The requests were allowed or refused as configured, but a consumer waiting
+for the mark sees nothing. Usually a custom `eviction.key` is missing from
+the `nodeecho-writer-scope` policy's allowed list. The `EvictionMarkFailed`
+Events on the pods, and the log line `Unable to record the eviction
+request`, give the API server's message.
+
 ### NodeEchoEchoSlow
 
 **Warning.** For 15 minutes, the 99th percentile of the time a pod waits in

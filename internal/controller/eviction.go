@@ -44,6 +44,8 @@ const EvictionPath = "/evictions"
 const (
 	ReasonEvictionRequested = "EvictionRequested"
 	ReasonEvictionRefused   = "EvictionRefused"
+	// ReasonEvictionMarkFailed: the request was answered but not recorded.
+	ReasonEvictionMarkFailed = "EvictionMarkFailed"
 )
 
 // evictionManagerPrefix is the field manager of the eviction marks. It is
@@ -112,7 +114,12 @@ func (w *EvictionWebhook) Handle(ctx context.Context, req admission.Request) adm
 		}
 		if _, marked := pod.Annotations[rule.Eviction.Key]; !marked {
 			if err := w.mark(ctx, pod, rule, received); err != nil {
+				// The request is still answered as configured: a consumer
+				// waiting for the mark would otherwise wait in silence.
+				evictionMarksFailed.Inc()
 				logger.Error(err, "Unable to record the eviction request", "rule", rule.Name)
+				w.Recorder.Eventf(pod, nil, corev1.EventTypeWarning, ReasonEvictionMarkFailed, "Evict",
+					"rule %s: eviction request not recorded on the pod: %v", rule.Name, err)
 			}
 		}
 		w.event(pod, rule, response)

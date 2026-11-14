@@ -27,6 +27,8 @@ tests:
         values: 0x30
       - series: nodeecho_pod_writes_total{job="nodeecho-metrics", rule="db", result="ok", pod="a"}
         values: 0+5x30
+      - series: nodeecho_eviction_marks_failed_total{job="nodeecho-metrics", pod="a"}
+        values: 0x30
     alert_rule_test:
       - {eval_time: 30m, alertname: NodeEchoDown, exp_alerts: []}
       - {eval_time: 30m, alertname: NodeEchoNoLeader, exp_alerts: []}
@@ -34,6 +36,7 @@ tests:
       - {eval_time: 30m, alertname: NodeEchoRulesRefused, exp_alerts: []}
       - {eval_time: 30m, alertname: NodeEchoReconcileErrors, exp_alerts: []}
       - {eval_time: 30m, alertname: NodeEchoWritesRejected, exp_alerts: []}
+      - {eval_time: 30m, alertname: NodeEchoEvictionMarksFailed, exp_alerts: []}
 
   - name: down, then no leader
     interval: 1m
@@ -117,6 +120,8 @@ tests:
         values: 0x10 3+0x10
       - series: nodeecho_keys_skipped_total{job="nodeecho-metrics", rule="db", reason="rejected", pod="a"}
         values: 0x10 5+5x10
+      - series: nodeecho_eviction_marks_failed_total{job="nodeecho-metrics", pod="a"}
+        values: 0x10 1+1x10
     alert_rule_test:
       - eval_time: 40m
         alertname: NodeEchoReconcileErrors
@@ -139,6 +144,19 @@ tests:
                 allowed list, or annotations over the size limit. The pods'
                 KeySkipped Events give the API server's message.
               runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechowritesrejected
+      - eval_time: 20m
+        alertname: NodeEchoEvictionMarksFailed
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: NodeEcho cannot record eviction requests on pods.
+              description: >-
+                The eviction webhook answered requests in the last 30 minutes
+                without writing the eviction mark, so a consumer waiting for it
+                sees nothing. Usually the eviction key is missing from the
+                nodeecho-writer-scope policy's allowed list. The pods'
+                EvictionMarkFailed Events give the API server's message.
+              runbook_url: https://fyannk.github.io/NodeEcho/docs/operator/observability/#nodeechoevictionmarksfailed
       # Rejections have their own alert: only owned-by-other is reported here.
       - eval_time: 20m
         alertname: NodeEchoKeysSkipped
