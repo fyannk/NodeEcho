@@ -28,6 +28,18 @@ helm template nodeecho "$CHART" --namespace nodeecho-system --set fullnameOverri
 	--set 'metrics.discovery={prometheus,opentelemetry}' >"$WORK/helm-full.yaml"
 helm template nodeecho "$CHART" --namespace nodeecho-system --set webhook.enabled=true \
 	--set webhook.certificates.provider=cert-manager --set metrics.secure=false >"$WORK/helm-plain.yaml"
+# Rules that write no nodeecho.fyannk.dev/ key, with the writer-scope policy.
+cat >"$WORK/rules-values.yaml" <<'YAML'
+rules:
+  - name: zone
+    podSelector: {matchLabels: {app: db}}
+    labels: {copy: [topology.kubernetes.io/zone]}
+policies:
+  writerScope: {enabled: true}
+YAML
+helm template nodeecho "$CHART" --namespace nodeecho-system --set fullnameOverride=nodeecho \
+	-f "$WORK/rules-values.yaml" >"$WORK/helm-rules.yaml"
+kubectl kustomize config/policy >"$WORK/kustomize-policy.yaml"
 
 WORK=$WORK python3 - <<'PY'
 import os, sys, pathlib, yaml
@@ -135,6 +147,24 @@ if not find(plain, "Certificate"):
 pdep = find(plain, "Deployment")["spec"]["template"]["spec"]["containers"][0]
 if "--metrics-secure=false" not in pdep["args"] or pdep["ports"][0] != {"name": "http-metrics", "containerPort": 8080}:
     problems.append("plain metrics do not switch to http-metrics on 8080")
+
+# 6. The writer-scope policy always lets NodeEcho change its own prefix,
+# whatever the rules write today: a rule removed from the values leaves keys
+# on the pods, and NodeEcho has to be allowed to remove them.
+def allowed(items, name):
+    policy = find(items, "ValidatingAdmissionPolicy", name)
+    for v in policy.get("spec", {}).get("variables", []):
+        if v["name"] == "allowed":
+            return v["expression"]
+    problems.append(f"{name} has no allowed list")
+    return ""
+
+for label, items in (("kustomize", docs(work / "kustomize-policy.yaml")), ("chart", docs(work / "helm-rules.yaml"))):
+    expression = allowed(items, "nodeecho-writer-scope")
+    if "nodeecho.fyannk.dev/" not in expression:
+        problems.append(f"the {label}'s writer-scope policy does not allow the nodeecho.fyannk.dev/ prefix: {expression}")
+if "topology.kubernetes.io/zone" not in allowed(docs(work / "helm-rules.yaml"), "nodeecho-writer-scope"):
+    problems.append("the chart's writer-scope policy does not allow the keys of its rules")
 
 for p in problems:
     print("FAIL", p)
