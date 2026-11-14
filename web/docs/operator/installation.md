@@ -172,11 +172,21 @@ spec:
   sourceNamespace: olm
 ```
 
-The bundle installs NodeEcho, its rules ConfigMap `nodeecho` (empty), the
+The bundle installs NodeEcho, the
 metrics Service and reader role, and the eviction webhook, whose certificate
-OLM issues. Edit the ConfigMap to add rules, and check it after an upgrade:
-the ConfigMap belongs to the bundle, and whether OLM puts the empty one back
-when it upgrades has not been tested. The admission policies and the
+OLM issues. It does not install the rules: OLM applies every object of a
+bundle again at each upgrade, which would reset them. Create the ConfigMap
+`nodeecho` in NodeEcho's namespace yourself, with `rules: []` to start with:
+
+```bash
+kubectl create configmap nodeecho -n <namespace> \
+  --from-literal=rules.yaml=$'version: 1\nrules: []\n'
+```
+
+Until it exists NodeEcho is not ready, so the ClusterServiceVersion stays
+short of `Succeeded`; it gets there once the ConfigMap is created. An
+upgrade then leaves your rules as they are, which the end-to-end test
+checks. The admission policies and the
 monitoring are not part of the bundle: apply `config/policy` and
 `config/prometheus` beside it, adapting the ServiceAccount's namespace in the
 policies.

@@ -21,8 +21,9 @@ spec:
     rights in its own namespace can then react to a cordoned node, a
     maintenance taint or a failure domain by reading its own pods.
 
-    The rules live in the ConfigMap `nodeecho` of NodeEcho's namespace; they
-    start empty, and NodeEcho writes nothing until you add some. The eviction
+    The rules live in the ConfigMap `nodeecho` of NodeEcho's namespace, which
+    you create: NodeEcho is not ready, and writes nothing, until it exists.
+    It is not part of the bundle, so that an upgrade never resets it. The eviction
     webhook records when NodeEcho first receives an eviction request for a pod
     a rule selects, and answers it as the rule says; it lets every eviction
     through otherwise, and while NodeEcho is down.
