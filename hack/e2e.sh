@@ -572,6 +572,19 @@ scenario_policy() {
 		fail "a pod created with a reserved label is allowed"
 	fi
 	ok "creating a pod with a reserved label is denied"
+	# The status subresource can change a pod's labels too, and more
+	# identities may write it than the pod itself.
+	k uncordon "$(node_of db-0)" >/dev/null
+	wait_for "uncordon removes it" label_absent db-0 nodeecho.fyannk.dev/unschedulable
+	k patch pod -n "$NS" db-0 --subresource=status --type=merge \
+		-p '{"metadata":{"labels":{"nodeecho.fyannk.dev/unschedulable":"true"}}}' >/dev/null 2>&1 || true
+	label_absent db-0 nodeecho.fyannk.dev/unschedulable || fail "a reserved label can be forged through pods/status"
+	ok "forging a reserved label through pods/status is denied"
+	k patch pod -n "$NS" db-0 --subresource=status --type=merge \
+		-p '{"metadata":{"labels":{"e2e.example.org/status":"yes"}}}' >/dev/null || fail "an unrelated status update is denied"
+	ok "other status updates are allowed"
+	k cordon "$(node_of db-0)" >/dev/null
+	wait_for "NodeEcho writes again" label_is db-0 nodeecho.fyannk.dev/unschedulable true
 	k uncordon "$(node_of db-0)" >/dev/null
 	wait_for "uncordon still removes it" label_absent db-0 nodeecho.fyannk.dev/unschedulable
 }

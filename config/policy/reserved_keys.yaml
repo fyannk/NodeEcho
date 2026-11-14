@@ -1,7 +1,9 @@
 # Rejects pod creations and updates that add, change or remove a
 # nodeecho.fyannk.dev/ label or annotation, unless NodeEcho makes them.
-# Status and binding subresources are not matched. Extend the prefix list
-# with the custom keys your rules write.
+# The status subresource is matched too: an update of a pod's status can
+# change its labels and annotations. The binding subresource is not, see
+# web/docs/operator/admission-policies.md. Extend the prefix list with the
+# custom keys your rules write.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -13,7 +15,7 @@ spec:
       - apiGroups: [""]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [pods]
+        resources: [pods, pods/status]
   matchConditions:
     - name: not-nodeecho
       expression: request.userInfo.username != "system:serviceaccount:nodeecho-system:nodeecho"
