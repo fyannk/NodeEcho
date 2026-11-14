@@ -85,12 +85,13 @@ export default function Home(): React.ReactElement {
         <section className="ne-section" aria-labelledby="status-title">
           <h2 id="status-title">Project status</h2>
           <p>
-            <span className="ne-status ne-status--warn">▲ Pre-release</span>
+            <span className="ne-status ne-status--warn">▲ 0.1.0, not production-ready</span>
           </p>
           <p>
             Contract v1 is implemented and tested on a real API server and on
-            k3d clusters, from Kubernetes 1.34 to 1.36. There is no released
-            image yet, and no consumer reads the keys upstream: see{' '}
+            k3d clusters, from Kubernetes 1.34 to 1.36. Version 0.1.0 is
+            published, but nothing has run it for long and no consumer reads
+            the keys upstream: see{' '}
             <Link to="/docs/overview/status/">what is missing before production</Link>.
           </p>
         </section>

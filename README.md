@@ -15,7 +15,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-090c0a?style=flat-square&labelColor=1b231d" alt="Apache-2.0 license"></a>
   <img src="https://img.shields.io/badge/Go-1.27-090c0a?style=flat-square&logo=go&logoColor=b3bf3a&labelColor=1b231d" alt="Go 1.27">
   <img src="https://img.shields.io/badge/Kubernetes-1.34--1.36-090c0a?style=flat-square&logo=kubernetes&logoColor=b3bf3a&labelColor=1b231d" alt="Kubernetes 1.34 to 1.36">
-  <img src="https://img.shields.io/badge/status-pre--release-090c0a?style=flat-square&labelColor=1b231d" alt="Pre-release">
+  <img src="https://img.shields.io/badge/status-0.1%20pre--1.0-090c0a?style=flat-square&labelColor=1b231d" alt="Version 0.1, pre-1.0">
 </p>
 
 NodeEcho is a Kubernetes controller. It watches Nodes and writes what you ask
@@ -29,7 +29,7 @@ nothing in NodeEcho is specific to it.
 > NodeEcho copies facts; it never decides that a node is draining or that a
 > pod should move. Each consumer keeps its own policy, and has to read the
 > keys: upstream CloudNativePG does not, so an integration is required. It is
-> an early implementation with no released version, not production-ready.
+> an early implementation, at version 0.1.0, and not production-ready.
 
 > [!NOTE]
 > An independent, personal project. It is not affiliated with, endorsed by or
@@ -58,18 +58,16 @@ nothing in NodeEcho is specific to it.
 ## Quick start
 
 Prerequisites: Docker, [k3d](https://k3d.io), kubectl and a clone of this
-repository. No image is published yet, so this builds one.
+repository, for its manifests. The image is pulled from `ghcr.io`.
 
 ```sh
 k3d cluster create nodeecho-demo --agents 1 \
   --kubeconfig-update-default=false --kubeconfig-switch-context=false
 export KUBECONFIG=$(k3d kubeconfig write nodeecho-demo)
 
-make docker-build IMG=nodeecho:dev
-k3d image import nodeecho:dev -c nodeecho-demo
 kubectl apply -k config/default
 kubectl apply -k config/rules
-kubectl -n nodeecho-system set image deployment/nodeecho manager=nodeecho:dev
+kubectl -n nodeecho-system set image deployment/nodeecho manager=ghcr.io/fyannk/nodeecho:0.1.0
 kubectl -n nodeecho-system rollout status deployment/nodeecho
 ```
 
@@ -87,10 +85,11 @@ continues from here: one rule, then a cordon and a taint reaching a pod.
 
 ## Project status
 
-Pre-release. Contract v1 is implemented and tested against a real API server
-(envtest) and end to end on k3d clusters (Kubernetes 1.34, 1.36, 1.36 with
-`PodTopologyLabelsAdmission` off, and each install path). No version is
-tagged yet, and the contract may still change before the first one. See
+Version 0.1.0, pre-1.0 and not production-ready. Contract v1 is implemented
+and tested against a real API server (envtest) and end to end on k3d clusters
+(Kubernetes 1.34, 1.36, 1.36 with `PodTopologyLabelsAdmission` off, and each
+install path). The image, the chart and the OLM bundle are published and
+signed; the contract may still change before 1.0. See
 [Status](https://fyannk.github.io/NodeEcho/docs/overview/status/) for what is
 missing before production.
 
