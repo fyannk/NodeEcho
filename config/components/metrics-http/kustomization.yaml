@@ -12,6 +12,21 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/ports/0
         value: {name: http-metrics, containerPort: 8080}
+  # Without authentication NodeEcho asks the API server nothing about its
+  # scrapers: the two rights for that go. The tests fail the build if the
+  # rules of config/rbac/cluster_role.yaml move.
+  - target: {kind: ClusterRole, name: nodeecho}
+    patch: |-
+      - op: test
+        path: /rules/4/resources
+        value: [subjectaccessreviews]
+      - op: remove
+        path: /rules/4
+      - op: test
+        path: /rules/3/resources
+        value: [tokenreviews]
+      - op: remove
+        path: /rules/3
   - target: {kind: Service, name: nodeecho-metrics}
     patch: |-
       - op: replace

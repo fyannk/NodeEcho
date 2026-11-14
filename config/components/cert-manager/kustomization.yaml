@@ -43,11 +43,14 @@ patches:
       kind: ClusterRoleBinding
       metadata:
         name: nodeecho-cert-rotation
+  # Turned off after the eviction-webhook component turned it on, the last
+  # one winning: replacing the whole list would drop what other components
+  # added to it, such as --metrics-secure=false.
   - target: {kind: Deployment, name: nodeecho}
     patch: |-
-      - op: replace
-        path: /spec/template/spec/containers/0/args
-        value: [--leader-elect, --webhook-port=9443]
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --cert-rotation=false
   - target: {kind: ValidatingWebhookConfiguration, name: nodeecho-eviction}
     patch: |-
       - op: add
