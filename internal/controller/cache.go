@@ -94,8 +94,9 @@ func stripPod(obj any, annotationKeys map[string]bool) (any, error) {
 
 // isNodeEchoManager matches the field managers of the pod projector and of
 // the eviction webhook.
-func isNodeEchoManager(manager string) bool {
-	return strings.HasPrefix(manager, fieldManagerPrefix) || strings.HasPrefix(manager, evictionManagerPrefix)
+func isNodeEchoManager(m metav1.ManagedFieldsEntry) bool {
+	return m.Operation == metav1.ManagedFieldsOperationApply &&
+		(strings.HasPrefix(m.Manager, fieldManagerPrefix) || strings.HasPrefix(m.Manager, evictionManagerPrefix))
 }
 
 func stripNode(obj any) (any, error) {

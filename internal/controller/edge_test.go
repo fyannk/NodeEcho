@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -134,6 +135,22 @@ func TestRuleRename(t *testing.T) {
 		return slices.Equal(managers(getPod(t, f.ns, "db")), []string{"nodeecho/cordon"})
 	})
 
+	// Every state the pod goes through is watched: a consumer must not see
+	// the node uncordoned for an instant because a rule changed its name.
+	w, err := k8s.Watch(context.Background(), &corev1.PodList{}, client.InNamespace(f.ns))
+	must(err)
+	defer w.Stop()
+	var blips []string
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		for e := range w.ResultChan() {
+			if p, ok := e.Object.(*corev1.Pod); ok && p.Name == "db" && !cordoned(p) {
+				blips = append(blips, fmt.Sprintf("%s, managers %v", e.Type, managers(p)))
+			}
+		}
+	}()
+
 	setRules(t, `- name: drain
   podSelector: {matchLabels: {app: db}}
   unschedulable: {}
@@ -142,6 +159,13 @@ func TestRuleRename(t *testing.T) {
 		p := getPod(t, f.ns, "db")
 		return cordoned(p) && slices.Equal(managers(p), []string{"nodeecho/drain"})
 	})
+	// The hand-over is the last write; give its event time to arrive.
+	time.Sleep(200 * time.Millisecond)
+	w.Stop()
+	<-watched
+	for _, blip := range blips {
+		t.Errorf("the key left the pod during the rename (%s)", blip)
+	}
 }
 
 func TestTwoRulesCopyingTheSameKey(t *testing.T) {
@@ -351,7 +375,7 @@ func TestApplyConflictSkipsTheKeyAndStillCleansUp(t *testing.T) {
 
 	rec := events.NewFakeRecorder(10)
 	r := &PodReconciler{Client: k8s, Recorder: rec}
-	if _, err := r.sync(ctx, snapshot, "test", manager, projection.Result{Labels: map[string]string{rack: "mine"}}); err != nil {
+	if _, err := r.sync(ctx, snapshot, "test", manager, projection.Result{Labels: map[string]string{rack: "mine"}}, metadataKeys{}); err != nil {
 		t.Fatal(err)
 	}
 	p := getPod(t, f.ns, "db")
@@ -539,7 +563,7 @@ func TestWriteToADeletedPodIsNotAnError(t *testing.T) {
 		return apierrors.IsNotFound(k8s.Get(ctx, client.ObjectKeyFromObject(snapshot), &corev1.Pod{}))
 	})
 	r := &PodReconciler{Client: k8s, Recorder: events.NewFakeRecorder(10)}
-	if _, err := r.sync(ctx, snapshot, "test", "test/gone", projection.Result{Labels: map[string]string{uKey: "true"}}); err != nil {
+	if _, err := r.sync(ctx, snapshot, "test", "test/gone", projection.Result{Labels: map[string]string{uKey: "true"}}, metadataKeys{}); err != nil {
 		t.Fatalf("writing to a deleted pod: %v", err)
 	}
 }

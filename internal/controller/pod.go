@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	corev1ac "k8s.io/client-go/applyconfigurations/core/v1"
@@ -116,6 +117,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	for name := range r.Store.Held() {
 		active[fieldManagerPrefix+name] = true
 	}
+	leaving := leavingKeys(pod, active)
 	for i := range rules {
 		rule := &rules[i]
 		desired := projection.Result{}
@@ -126,16 +128,17 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 				continue
 			}
 		}
-		refused, err := r.sync(ctx, pod, rule.Name, rule.FieldManager(), desired)
+		refused, err := r.sync(ctx, pod, rule.Name, rule.FieldManager(), desired, leaving)
 		rejected = rejected || refused
 		errs = append(errs, err)
 	}
 
-	// Field managers of rules that no longer exist.
+	// Field managers of rules that no longer exist. They go after the rules,
+	// so that a rule taking over a key holds it before the old one lets go.
 	for _, m := range pod.ManagedFields {
 		if strings.HasPrefix(m.Manager, fieldManagerPrefix) && m.Operation == "Apply" && !active[m.Manager] {
 			active[m.Manager] = true
-			refused, err := r.sync(ctx, pod, removedRule, m.Manager, projection.Result{})
+			refused, err := r.sync(ctx, pod, removedRule, m.Manager, projection.Result{}, metadataKeys{})
 			rejected = rejected || refused
 			errs = append(errs, err)
 		}
@@ -153,6 +156,33 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
+// metadataKeys is a set of label keys and a set of annotation keys.
+type metadataKeys struct{ labels, annotations map[string]bool }
+
+// leavingKeys returns the keys held only by rules that no longer exist: the
+// field managers under nodeecho/ that are not active. A rule that now wants
+// such a key with the value it has takes it over instead of treating it as
+// another writer's, so that renaming a rule, or moving a key from one rule
+// to another, never takes the key off the pod. A key any other writer also
+// holds is left out: that one stays another writer's.
+func leavingKeys(pod *corev1.Pod, active map[string]bool) metadataKeys {
+	gone := func(m metav1.ManagedFieldsEntry) bool {
+		return m.Operation == metav1.ManagedFieldsOperationApply && strings.HasPrefix(m.Manager, fieldManagerPrefix) && !active[m.Manager]
+	}
+	labelKeys, annotationKeys := ownedKeysOf(pod, gone)
+	if len(labelKeys)+len(annotationKeys) == 0 {
+		return metadataKeys{}
+	}
+	otherLabels, otherAnnotations := ownedKeysOf(pod, func(m metav1.ManagedFieldsEntry) bool { return !gone(m) })
+	for k := range otherLabels {
+		delete(labelKeys, k)
+	}
+	for k := range otherAnnotations {
+		delete(annotationKeys, k)
+	}
+	return metadataKeys{labels: labelKeys, annotations: annotationKeys}
+}
+
 func inScope(rule *Rule, ns *corev1.Namespace, pod *corev1.Pod, node *corev1.Node) bool {
 	return rule.pods.Matches(labels.Set(pod.Labels)) &&
 		rule.namespaces.Matches(labels.Set(ns.Labels)) &&
@@ -167,13 +197,13 @@ const removedRule = "(removed)"
 // sync applies the desired keys of one field manager, skipping the keys
 // another writer owns, and writes nothing when the pod already matches. It
 // reports whether the API server rejected the write.
-func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager string, desired projection.Result) (rejected bool, err error) {
+func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager string, desired projection.Result, leaving metadataKeys) (rejected bool, err error) {
 	for _, s := range desired.Skipped {
 		r.skip(ctx, pod, rule, s.Key, "invalid-value", s.Reason)
 	}
 	ownedLabels, ownedAnnotations := ownedKeys(pod, manager)
-	wantLabels := r.withoutForeign(ctx, pod, rule, desired.Labels, pod.Labels, ownedLabels)
-	wantAnnotations := r.withoutForeign(ctx, pod, rule, desired.Annotations, pod.Annotations, ownedAnnotations)
+	wantLabels := r.withoutForeign(ctx, pod, rule, desired.Labels, pod.Labels, ownedLabels, leaving.labels)
+	wantAnnotations := r.withoutForeign(ctx, pod, rule, desired.Annotations, pod.Annotations, ownedAnnotations, leaving.annotations)
 
 	retry := false
 	for attempt := 0; ; attempt++ {
@@ -235,11 +265,14 @@ func (r *PodReconciler) sync(ctx context.Context, pod *corev1.Pod, rule, manager
 // another writer's key. With another value, the key is skipped with an Event
 // and a metric. With the wanted value already there, nothing is wrong and
 // nothing is said: a key another writer keeps right needs no write, as the
-// zone and region Kubernetes copies at binding.
-func (r *PodReconciler) withoutForeign(ctx context.Context, pod *corev1.Pod, rule string, want, current map[string]string, owned map[string]bool) map[string]string {
+// zone and region Kubernetes copies at binding. A key in leaving is not
+// another writer's: only a rule that no longer exists holds it, and with the
+// wanted value this rule takes it over, see leavingKeys.
+func (r *PodReconciler) withoutForeign(ctx context.Context, pod *corev1.Pod, rule string, want, current map[string]string, owned, leaving map[string]bool) map[string]string {
 	out := make(map[string]string, len(want))
 	for k, v := range want {
-		if cur, exists := current[k]; exists && !owned[k] {
+		cur, exists := current[k]
+		if takeOver := leaving[k] && cur == v; exists && !owned[k] && !takeOver {
 			if cur != v {
 				r.skip(ctx, pod, rule, k, "owned-by-other", "key set by another writer")
 			} else {
@@ -278,15 +311,17 @@ func upToDate(want, current map[string]string, owned map[string]bool) bool {
 // ownedKeys returns the label and annotation keys a field manager owns on the
 // pod, from its managedFields entry.
 func ownedKeys(pod *corev1.Pod, manager string) (labelKeys, annotationKeys map[string]bool) {
-	return ownedKeysOf(pod, func(m string) bool { return m == manager })
+	return ownedKeysOf(pod, func(m metav1.ManagedFieldsEntry) bool {
+		return m.Manager == manager && m.Operation == metav1.ManagedFieldsOperationApply
+	})
 }
 
-// ownedKeysOf returns the label and annotation keys owned by the apply
-// field managers that match.
-func ownedKeysOf(pod *corev1.Pod, match func(manager string) bool) (labelKeys, annotationKeys map[string]bool) {
+// ownedKeysOf returns the label and annotation keys owned by the
+// managedFields entries that match.
+func ownedKeysOf(pod *corev1.Pod, match func(metav1.ManagedFieldsEntry) bool) (labelKeys, annotationKeys map[string]bool) {
 	labelKeys, annotationKeys = map[string]bool{}, map[string]bool{}
 	for _, m := range pod.ManagedFields {
-		if !match(m.Manager) || m.Operation != "Apply" || m.FieldsV1 == nil {
+		if m.FieldsV1 == nil || !match(m) {
 			continue
 		}
 		var fields struct {
