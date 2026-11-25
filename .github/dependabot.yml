@@ -26,6 +26,27 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
 
+  # The catalog's tools (deploy/olm/catalog/opm): only opm and
+  # grpc-health-probe themselves; the rest follows what they release with.
+  - package-ecosystem: gomod
+    directory: /deploy/olm/catalog/opm
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"
+    allow:
+      - dependency-type: direct
+    ignore:
+      - dependency-name: golang
+    groups:
+      opm-tools:
+        applies-to: version-updates
+        patterns: ["*"]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -41,7 +62,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker
-    directory: /
+    directories: ["/", "/deploy/olm"]
     schedule:
       interval: weekly
       day: monday
