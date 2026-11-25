@@ -69,6 +69,7 @@ jobs:
           file: deploy/olm/bundle.Dockerfile
           push: true
           provenance: mode=max
+          sbom: true
           tags: ghcr.io/${{ github.repository_owner }}/nodeecho-bundle:${{ steps.tag.outputs.tag }}
 
       - name: OLM catalog
@@ -80,6 +81,7 @@ jobs:
           file: deploy/olm/catalog.Dockerfile
           push: true
           provenance: mode=max
+          sbom: true
           tags: ghcr.io/${{ github.repository_owner }}/nodeecho-catalog:${{ steps.tag.outputs.tag }}
 
       # Keyless: the signature binds the image digest to this workflow's

@@ -1,0 +1,80 @@
+name: Published image watch
+
+# CI scans what the current commit builds. An advisory filed after an image
+# was published is tracked here: one issue per image opens when the latest
+# release has a fixable critical, is updated in place while it remains, and
+# closes once a release has cleared it.
+on:
+  schedule:
+    - cron: "11 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: image-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Fixable criticals in ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # read the latest release
+      issues: write # open, update and close the tracking issue
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [nodeecho, nodeecho-catalog]
+    steps:
+      - name: Install grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+      - name: Open, update or close the tracking issue
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+          NAME: ${{ matrix.image }}
+          OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Published image ${NAME} has fixable critical vulnerabilities"
+          tag="$(gh release view --json tagName --jq .tagName)"
+          image="ghcr.io/${OWNER}/${NAME}:${tag#v}"
+
+          "${GRYPE}" -q -o json "registry:${image}" > scan.json
+          findings="$(jq -r '[.matches[]
+            | select(.vulnerability.severity == "Critical" and .vulnerability.fix.state == "fixed")
+            | "| \(.vulnerability.id) | \(.artifact.name) | \(.artifact.version) | \(.vulnerability.fix.versions | join(", ")) |"]
+            | unique | .[]' scan.json)"
+
+          number="$(gh issue list --state open --search "in:title \"${title}\"" \
+            --json number,title --jq ".[] | select(.title == \"${title}\") | .number" | head -n 1)"
+
+          if [[ -z "${findings}" ]]; then
+            if [[ -n "${number}" ]]; then
+              gh issue close "${number}" --comment "Cleared: [this scan](${RUN_URL}) of \`${image}\` finds no fixable critical."
+            fi
+            echo "No fixable critical in ${image}."
+            exit 0
+          fi
+
+          body="$(cat <<EOF
+          [The nightly scan](${RUN_URL}) of \`${image}\` found fixable critical vulnerabilities.
+
+          | Advisory | Package | Installed | Fixed in |
+          | --- | --- | --- | --- |
+          ${findings}
+
+          The next release should carry the fixes. This issue closes itself once
+          the latest release scans clean.
+          EOF
+          )"
+          if [[ -n "${number}" ]]; then
+            gh issue edit "${number}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi
