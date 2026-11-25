@@ -26,4 +26,12 @@ if [ "$mod" != "$img" ]; then
   exit 1
 fi
 
+# The catalog image builds opm with the same toolchain, in its two Go stages.
+olm=$(sed -n 's/^toolchain go\([0-9][0-9.]*\)$/\1/p' deploy/olm/catalog/opm/go.mod)
+olmimg=$(sed -n 's|^FROM \(--platform=[^ ]* \)\{0,1\}golang:\([0-9][0-9.]*\)[@ ].*|\2|p' deploy/olm/catalog.Dockerfile | sort -u)
+if [ "$mod" != "$olm" ] || [ "$mod" != "$olmimg" ]; then
+  echo "Go toolchain drift: go.mod says $mod, deploy/olm/catalog/opm/go.mod '$olm', deploy/olm/catalog.Dockerfile '$olmimg'" >&2
+  exit 1
+fi
+
 echo "Go toolchain agrees at $mod"

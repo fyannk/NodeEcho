@@ -1,6 +1,7 @@
 #!/bin/sh
 # Moves the Go toolchain to the latest patch release of its minor version,
-# in go.mod and in the Dockerfile's builder image together, so
+# in go.mod and in the Dockerfile's builder image together (and in the OLM
+# catalog's module and Dockerfile, which build with it), so
 # check-go-version.sh keeps agreeing. Dependabot moves the image alone and
 # leaves go.mod behind; patch releases are where Go ships its security
 # fixes, so this is the update that cannot wait for a human.
@@ -33,7 +34,7 @@ if [ -z "$digest" ]; then
   exit 0
 fi
 
-sed -i "s/^toolchain go$current\$/toolchain go$latest/" go.mod
-sed -i "s|golang:$current@sha256:[0-9a-f]\{64\}|golang:$latest@$digest|" Dockerfile
+sed -i "s/^toolchain go$current\$/toolchain go$latest/" go.mod deploy/olm/catalog/opm/go.mod
+sed -i "s|golang:$current@sha256:[0-9a-f]\{64\}|golang:$latest@$digest|" Dockerfile deploy/olm/catalog.Dockerfile
 ./hack/check-go-version.sh >&2
 echo "$latest"

@@ -95,6 +95,9 @@ also carries an SBOM and a provenance attestation from BuildKit.
 
 ## Dependencies
 
+The catalog image builds `opm` and `grpc_health_probe` from source, at the
+versions pinned in `deploy/olm/catalog/opm/go.mod`, with the same Go toolchain.
+
 Dependabot follows the Go module, the GitHub Actions and the image bases,
 not the documentation site: its build tooling is most of the noise and none
 of it ships with NodeEcho. In `web/package.json`, the libraries that reach
