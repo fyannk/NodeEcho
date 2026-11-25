@@ -29,7 +29,7 @@ nothing in NodeEcho is specific to it.
 > NodeEcho copies facts; it never decides that a node is draining or that a
 > pod should move. Each consumer keeps its own policy, and has to read the
 > keys: upstream CloudNativePG does not, so an integration is required. It is
-> an early implementation, at version 0.1.0, and not production-ready.
+> an early implementation, at version 0.1.1, and not production-ready.
 
 > [!NOTE]
 > An independent, personal project. It is not affiliated with, endorsed by or
@@ -67,7 +67,7 @@ export KUBECONFIG=$(k3d kubeconfig write nodeecho-demo)
 
 kubectl apply -k config/default
 kubectl apply -k config/rules
-kubectl -n nodeecho-system set image deployment/nodeecho manager=ghcr.io/fyannk/nodeecho:0.1.0
+kubectl -n nodeecho-system set image deployment/nodeecho manager=ghcr.io/fyannk/nodeecho:0.1.1
 kubectl -n nodeecho-system rollout status deployment/nodeecho
 ```
 
@@ -85,7 +85,7 @@ continues from here: one rule, then a cordon and a taint reaching a pod.
 
 ## Project status
 
-Version 0.1.0, pre-1.0 and not production-ready. Contract v1 is implemented
+Version 0.1.1, pre-1.0 and not production-ready. Contract v1 is implemented
 and tested against a real API server (envtest) and end to end on k3d clusters
 (Kubernetes 1.34, 1.36, 1.36 with `PodTopologyLabelsAdmission` off, and each
 install path). The image, the chart and the OLM bundle are published and

@@ -1,12 +1,12 @@
 apiVersion: operators.coreos.com/v1alpha1
 kind: ClusterServiceVersion
 metadata:
-  name: nodeecho.v0.1.0
+  name: nodeecho.v0.1.1
   namespace: placeholder
   annotations:
     capabilities: Basic Install
     categories: Developer Tools
-    containerImage: ghcr.io/fyannk/nodeecho:0.1.0
+    containerImage: ghcr.io/fyannk/nodeecho:0.1.1
     createdAt: "2026-10-16T00:00:00Z"
     repository: https://github.com/fyannk/NodeEcho
     support: https://github.com/fyannk/NodeEcho/issues
@@ -29,7 +29,8 @@ spec:
     through otherwise, and while NodeEcho is down.
 
     Documentation: https://fyannk.github.io/NodeEcho/
-  version: 0.1.0
+  version: 0.1.1
+  replaces: nodeecho.v0.1.0
   maturity: alpha
   minKubeVersion: 1.30.0
   provider:
@@ -107,7 +108,7 @@ spec:
                     type: RuntimeDefault
                 containers:
                   - name: manager
-                    image: ghcr.io/fyannk/nodeecho:0.1.0
+                    image: ghcr.io/fyannk/nodeecho:0.1.1
                     # OLM issues the webhook certificate and mounts it in
                     # /tmp/k8s-webhook-server/serving-certs, NodeEcho's
                     # default --cert-dir.

@@ -1,5 +1,5 @@
 # File-based OLM catalog for NodeEcho.
-#   docker build -f deploy/olm/catalog.Dockerfile -t nodeecho-catalog:0.1.0 deploy/olm/catalog
+#   docker build -f deploy/olm/catalog.Dockerfile -t nodeecho-catalog:0.1.1 deploy/olm/catalog
 #
 # opm and grpc_health_probe are built from the module in catalog/opm rather
 # than taken from the upstream opm image, which ships them built with an older
