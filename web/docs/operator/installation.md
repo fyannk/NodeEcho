@@ -31,9 +31,9 @@ Every image and the chart are signed keyless with [cosign](https://docs.sigstore
 by the GitHub Actions workflow that built them; the signature binds the
 digest to the repository, the workflow file and the git ref, and is recorded
 in the Rekor transparency log. The same workflows record a GitHub build
-provenance attestation for each image and for the chart. The NodeEcho image
-also carries an SBOM (SPDX) and a SLSA provenance attestation attached by
-BuildKit.
+provenance attestation for each image and for the chart. Every image also
+carries an SBOM (SPDX) and a SLSA provenance attestation attached by
+BuildKit; the bundle holds manifests only, so its SBOM lists no package.
 
 ```bash
 # A released image, or the chart: built by the images or release workflow on a tag.
