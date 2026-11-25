@@ -26,7 +26,7 @@ kubectl get nodes
 ```bash
 kubectl apply -k config/default
 kubectl apply -k config/rules
-kubectl -n nodeecho-system set image deployment/nodeecho manager=ghcr.io/fyannk/nodeecho:0.1.0
+kubectl -n nodeecho-system set image deployment/nodeecho manager=ghcr.io/fyannk/nodeecho:0.1.1
 kubectl -n nodeecho-system rollout status deployment/nodeecho
 ```
 

@@ -5,7 +5,7 @@ title: Status
 
 # Status
 
-**Version 0.1.0: an early implementation, not production-ready.**
+**Version 0.1.1: an early implementation, not production-ready.**
 
 ## Done
 

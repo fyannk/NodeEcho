@@ -408,28 +408,28 @@ scenario_olm_upgrade() {
 	local reg=localhost:$REGISTRY_PORT incluster=nodeecho-e2e-registry:$REGISTRY_PORT olm=$WORK/olm before
 	before=$(k get configmap nodeecho -n "$SYS" -o jsonpath='{.data.rules\.yaml}')
 	grep -q 'name: db' <<<"$before" || fail "no rule to keep before the upgrade"
-	sed -i 's/name: nodeecho.v0.1.0/name: nodeecho.v0.1.1/; s/^  version: 0.1.0/  version: 0.1.1\n  replaces: nodeecho.v0.1.0/' \
+	sed -i 's/name: nodeecho.v0.1.1/name: nodeecho.v0.1.2/; s/^  version: 0.1.1/  version: 0.1.2/; s/^  replaces: nodeecho.v0.1.0/  replaces: nodeecho.v0.1.1/' \
 		"$olm/bundle/manifests/nodeecho.clusterserviceversion.yaml"
-	sed -i 's/  - name: nodeecho.v0.1.0/  - name: nodeecho.v0.1.0\n  - name: nodeecho.v0.1.1\n    replaces: nodeecho.v0.1.0/' \
+	sed -i 's/  - name: nodeecho.v0.1.1/  - name: nodeecho.v0.1.2\n    replaces: nodeecho.v0.1.1\n&/' \
 		"$olm/catalog/nodeecho/catalog.yaml"
 	cat >>"$olm/catalog/nodeecho/catalog.yaml" <<NEXT
 ---
 schema: olm.bundle
 package: nodeecho
-name: nodeecho.v0.1.1
+name: nodeecho.v0.1.2
 image: $incluster/nodeecho-bundle:e2e-next
 properties:
   - type: olm.package
     value:
       packageName: nodeecho
-      version: 0.1.1
+      version: 0.1.2
 NEXT
 	docker build -q -f "$olm/bundle.Dockerfile" -t "$reg/nodeecho-bundle:e2e-next" "$olm/bundle" >/dev/null
 	docker build -q -f "$olm/catalog.Dockerfile" -t "$reg/nodeecho-catalog:e2e-next" "$olm/catalog" >/dev/null
 	for i in nodeecho-bundle nodeecho-catalog; do docker push -q "$reg/$i:e2e-next" >/dev/null; done
 	k patch catalogsource nodeecho -n olm --type=merge \
 		-p "{\"spec\":{\"image\":\"$incluster/nodeecho-catalog:e2e-next\"}}" >/dev/null
-	TIMEOUT=300 wait_for "OLM upgraded to the next version" csv_is nodeecho.v0.1.1
+	TIMEOUT=300 wait_for "OLM upgraded to the next version" csv_is nodeecho.v0.1.2
 	[[ $(k get configmap nodeecho -n "$SYS" -o jsonpath='{.data.rules\.yaml}') == "$before" ]] ||
 		fail "the OLM upgrade changed the rules"
 	ok "the rules are as they were before the upgrade"

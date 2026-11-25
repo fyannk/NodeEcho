@@ -2,8 +2,8 @@ apiVersion: v2
 name: nodeecho
 description: NodeEcho echoes Node facts (cordon, taints, labels, annotations) onto the pods running there, so namespace-scoped operators need no access to Nodes.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.1.1
+appVersion: "0.1.1"
 keywords:
   - kubernetes
   - nodes

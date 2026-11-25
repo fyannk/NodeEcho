@@ -1,5 +1,5 @@
 # OLM bundle image for NodeEcho.
-#   docker build -f deploy/olm/bundle.Dockerfile -t nodeecho-bundle:0.1.0 deploy/olm/bundle
+#   docker build -f deploy/olm/bundle.Dockerfile -t nodeecho-bundle:0.1.1 deploy/olm/bundle
 FROM scratch
 
 LABEL operators.operatorframework.io.bundle.mediatype.v1=registry+v1

@@ -10,14 +10,15 @@ schema: olm.channel
 package: nodeecho
 name: alpha
 entries:
-  - name: nodeecho.v0.1.0
+  - name: nodeecho.v0.1.1
+    replaces: nodeecho.v0.1.0
 ---
 schema: olm.bundle
 package: nodeecho
-name: nodeecho.v0.1.0
-image: ghcr.io/fyannk/nodeecho-bundle:0.1.0
+name: nodeecho.v0.1.1
+image: ghcr.io/fyannk/nodeecho-bundle:0.1.1
 properties:
   - type: olm.package
     value:
       packageName: nodeecho
-      version: 0.1.0
+      version: 0.1.1
